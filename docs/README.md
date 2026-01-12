@@ -22,7 +22,7 @@ Ralph supervises your AI coding agent to actually finish what it starts.
 ## In a Hurry?
 
 ```bash
-pip install ralph-loop
+pipx install ralph-loop
 ralph init
 # Edit PROMPT.md with your goal
 ralph run

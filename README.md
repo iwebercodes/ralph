@@ -16,7 +16,7 @@ When Claude loses track, declares "done" prematurely, or forgets earlier decisio
 
 1. **Install and initialize**
    ```bash
-   pip install ralph-loop
+   pipx install ralph-loop
    ralph init
    ```
 
@@ -52,7 +52,7 @@ After each chunk, Ralph:
 2. Starts a fresh session (so context stays clean)
 3. Hands off the state (so Claude picks up where it left off)
 
-When Claude says "done", Ralph doesn't just trust it—it verifies 3 times with fresh eyes. If anything was missed, work continues.
+When Claude says "done", Ralph doesn't just trust it. It verifies 3 times with fresh eyes. If anything was missed, work continues.
 
 **Result:** Tasks that used to fail halfway through now complete reliably.
 

@@ -6,7 +6,7 @@ Get from zero to your first successful Ralph run in under 5 minutes.
 
 Before you start, you need:
 
-- **Python 3.8 or higher** - Check with `python --version`
+- **Python 3.10 or higher** - Check with `python --version`
 - **Claude CLI** - The command-line tool from Anthropic
 
 If you don't have Claude CLI installed, get it from [claude.ai/download](https://claude.ai/download). After installing, verify it works:
@@ -18,8 +18,10 @@ claude --version
 ## Install Ralph
 
 ```bash
-pip install ralph-loop
+pipx install ralph-loop
 ```
+
+This installs the `ralph` command globally. If you don't have pipx, [install it first](https://pipx.pypa.io/stable/installation/) or use `pip install ralph-loop` in a virtual environment.
 
 ## Your First Project
 
