@@ -41,7 +41,16 @@ def invoke_claude(
     Returns:
         ClaudeResult with output, exit code, and any error message
     """
-    cmd = ["claude", "-p", prompt, "--output-format", "text", "--dangerously-skip-permissions"]
+    # Use shutil.which to get full path, needed for Windows to find .cmd files
+    claude_path = shutil.which("claude")
+    if claude_path is None:
+        return ClaudeResult(
+            output="",
+            exit_code=-1,
+            error="claude CLI not found in PATH",
+        )
+
+    cmd = [claude_path, "-p", prompt, "--output-format", "text", "--dangerously-skip-permissions"]
 
     if allowed_tools:
         for tool in allowed_tools:

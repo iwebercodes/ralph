@@ -34,8 +34,8 @@ class TestRunTestCommand:
     def test_nonexistent_command(self) -> None:
         """Test running a nonexistent command."""
         exit_code, output = run_test_command("nonexistent_command_12345")
-        # Shell returns 127 for command not found
-        assert exit_code == 127
+        # Shell returns 127 on Unix, 1 on Windows for command not found
+        assert exit_code in (1, 127)
 
 
 class TestFormatLogEntry:

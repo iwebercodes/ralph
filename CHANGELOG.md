@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.1.2 - Windows Compatibility
+
+Fixes for Windows platform support.
+
+### Fixed
+
+- File snapshots now use forward slashes consistently across all platforms
+- Mock Claude CLI works correctly on Windows (uses .cmd wrapper)
+- subprocess calls find executables with .cmd extension on Windows
+
+## v0.1.1 - Documentation Updates
+
+- Changed recommended install method to `pipx install ralph-loop`
+- Fixed Python version requirement in docs (3.10+, not 3.8+)
+- Added GitHub Actions workflow for automated PyPI publishing
+
 ## v0.1.0 - Initial Release
 
 First public release of Ralph, an autonomous supervisor for Claude Code.

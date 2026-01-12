@@ -43,7 +43,7 @@ def take_snapshot(
             continue
 
         rel_path = path.relative_to(root)
-        rel_str = str(rel_path)
+        rel_str = rel_path.as_posix()
 
         if spec.match_file(rel_str):
             continue

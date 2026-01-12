@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import stat
+import sys
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,8 @@ from ralph.core.claude import (
     invoke_claude,
     is_claude_available,
 )
+
+IS_WINDOWS = sys.platform == "win32"
 
 
 class TestClaudeResult:
@@ -52,6 +55,7 @@ class TestIsClaudeAvailable:
         monkeypatch.setenv("PATH", "/nonexistent")
         assert is_claude_available() is False
 
+    @pytest.mark.skipif(IS_WINDOWS, reason="Bash scripts don't work on Windows")
     def test_when_available(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -70,6 +74,7 @@ class TestIsClaudeAvailable:
 class TestInvokeClaude:
     """Tests for invoke_claude function."""
 
+    @pytest.mark.skipif(IS_WINDOWS, reason="Bash scripts don't work on Windows")
     def test_with_allowed_tools(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -90,6 +95,7 @@ class TestInvokeClaude:
         assert result.exit_code == 0
         assert "--allowedTools" in result.output
 
+    @pytest.mark.skipif(IS_WINDOWS, reason="Bash scripts don't work on Windows")
     def test_timeout_handling(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import os
 import stat
+import sys
 from collections.abc import Generator
 from pathlib import Path
 
 import pytest
+
+IS_WINDOWS = sys.platform == "win32"
 
 from ralph.core.state import (
     GUARDRAILS_TEMPLATE,
@@ -74,26 +77,21 @@ class MockClaude:
 
     def setup(self) -> Path:
         """Set up the mock claude script and return the bin directory."""
-        import sys
         bin_dir = self._mock_dir / "mock_bin"
         bin_dir.mkdir(exist_ok=True)
-
-        script = bin_dir / "claude"
-        self._script_path = script
 
         # Use the actual python executable path
         python_path = sys.executable
 
-        # Create a simple mock script that reads responses from a file
-        # The script uses cwd to find the .ralph directory
-        script_content = f'''#!{python_path}
-import sys
+        # Create a Python script that will be called
+        py_script = bin_dir / "mock_claude.py"
+        py_script_content = f'''import sys
 import json
 import os
 from pathlib import Path
 
-responses_file = Path("{self._responses_file}")
-count_file = Path("{self._count_file}")
+responses_file = Path(r"{self._responses_file}")
+count_file = Path(r"{self._count_file}")
 ralph_dir = Path(os.getcwd()) / ".ralph"
 
 if responses_file.exists():
@@ -125,9 +123,19 @@ if responses_file.exists():
 
 sys.exit(0)
 '''
-        script.write_text(script_content)
-        script.chmod(script.stat().st_mode | stat.S_IEXEC)
+        py_script.write_text(py_script_content)
 
+        if IS_WINDOWS:
+            # On Windows, create a .cmd wrapper
+            script = bin_dir / "claude.cmd"
+            script.write_text(f'@"{python_path}" "{py_script}" %*\n')
+        else:
+            # On Unix, create a shell script with shebang
+            script = bin_dir / "claude"
+            script.write_text(f'#!/bin/sh\n"{python_path}" "{py_script}" "$@"\n')
+            script.chmod(script.stat().st_mode | stat.S_IEXEC)
+
+        self._script_path = script
         return bin_dir
 
     def set_responses(self, responses: list[dict[str, object]]) -> None:
@@ -149,8 +157,8 @@ def mock_claude(temp_project: Path, monkeypatch: pytest.MonkeyPatch) -> MockClau
     mock = MockClaude(temp_project)
     bin_dir = mock.setup()
 
-    # Prepend mock bin to PATH
+    # Prepend mock bin to PATH (use os.pathsep for cross-platform compatibility)
     original_path = os.environ.get("PATH", "")
-    monkeypatch.setenv("PATH", f"{bin_dir}:{original_path}")
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{original_path}")
 
     return mock
