@@ -1,5 +1,9 @@
 # Ralph
 
+<p align="center">
+  <img src="ralph.png" alt="Ralph - the supervisor" width="200">
+</p>
+
 Stop cleaning up after your AI coding agent.
 
 Ralph supervises Claude Code (and other agents soon) to actually finish what they start.
