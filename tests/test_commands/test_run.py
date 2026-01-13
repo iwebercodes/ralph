@@ -60,11 +60,13 @@ def test_run_single_iteration(
     mock_claude: MockClaude,
 ) -> None:
     """Test run executes a single iteration."""
-    mock_claude.set_responses([
-        {"status": "DONE", "output": "First iteration done", "changes": []},
-        {"status": "DONE", "output": "Review 1", "changes": []},
-        {"status": "DONE", "output": "Review 2", "changes": []},
-    ])
+    mock_claude.set_responses(
+        [
+            {"status": "DONE", "output": "First iteration done", "changes": []},
+            {"status": "DONE", "output": "Review 1", "changes": []},
+            {"status": "DONE", "output": "Review 2", "changes": []},
+        ]
+    )
 
     result = runner.invoke(app, ["run", "--max", "10"])
 
@@ -78,12 +80,14 @@ def test_run_rotate_then_done(
     mock_claude: MockClaude,
 ) -> None:
     """Test run handles ROTATE then DONE signals."""
-    mock_claude.set_responses([
-        {"status": "ROTATE", "output": "Making progress", "changes": ["file1.py"]},
-        {"status": "DONE", "output": "Finished", "changes": []},
-        {"status": "DONE", "output": "Review 1", "changes": []},
-        {"status": "DONE", "output": "Review 2", "changes": []},
-    ])
+    mock_claude.set_responses(
+        [
+            {"status": "ROTATE", "output": "Making progress", "changes": ["file1.py"]},
+            {"status": "DONE", "output": "Finished", "changes": []},
+            {"status": "DONE", "output": "Review 1", "changes": []},
+            {"status": "DONE", "output": "Review 2", "changes": []},
+        ]
+    )
 
     result = runner.invoke(app, ["run", "--max", "10"])
 
@@ -96,9 +100,11 @@ def test_run_stuck_exits(
     mock_claude: MockClaude,
 ) -> None:
     """Test run exits with code 2 on STUCK signal."""
-    mock_claude.set_responses([
-        {"status": "STUCK", "output": "I'm blocked", "changes": []},
-    ])
+    mock_claude.set_responses(
+        [
+            {"status": "STUCK", "output": "I'm blocked", "changes": []},
+        ]
+    )
 
     result = runner.invoke(app, ["run", "--max", "10"])
 
@@ -112,10 +118,12 @@ def test_run_max_iterations(
 ) -> None:
     """Test run stops at max iterations."""
     # All ROTATE signals to keep going
-    mock_claude.set_responses([
-        {"status": "ROTATE", "output": "Still working", "changes": [f"file{i}.py"]}
-        for i in range(5)
-    ])
+    mock_claude.set_responses(
+        [
+            {"status": "ROTATE", "output": "Still working", "changes": [f"file{i}.py"]}
+            for i in range(5)
+        ]
+    )
 
     result = runner.invoke(app, ["run", "--max", "3"])
 
@@ -129,12 +137,14 @@ def test_run_done_with_changes_resets(
     mock_claude: MockClaude,
 ) -> None:
     """Test DONE with changes resets verification count."""
-    mock_claude.set_responses([
-        {"status": "DONE", "output": "Done but changed", "changes": ["file.py"]},
-        {"status": "DONE", "output": "Really done", "changes": []},
-        {"status": "DONE", "output": "Review 1", "changes": []},
-        {"status": "DONE", "output": "Review 2", "changes": []},
-    ])
+    mock_claude.set_responses(
+        [
+            {"status": "DONE", "output": "Done but changed", "changes": ["file.py"]},
+            {"status": "DONE", "output": "Really done", "changes": []},
+            {"status": "DONE", "output": "Review 1", "changes": []},
+            {"status": "DONE", "output": "Review 2", "changes": []},
+        ]
+    )
 
     result = runner.invoke(app, ["run", "--max", "10"])
 
@@ -148,11 +158,13 @@ def test_run_creates_history(
     mock_claude: MockClaude,
 ) -> None:
     """Test run creates history log files."""
-    mock_claude.set_responses([
-        {"status": "DONE", "output": "Done", "changes": []},
-        {"status": "DONE", "output": "Review", "changes": []},
-        {"status": "DONE", "output": "Review", "changes": []},
-    ])
+    mock_claude.set_responses(
+        [
+            {"status": "DONE", "output": "Done", "changes": []},
+            {"status": "DONE", "output": "Review", "changes": []},
+            {"status": "DONE", "output": "Review", "changes": []},
+        ]
+    )
 
     runner.invoke(app, ["run", "--max", "10"])
 
@@ -168,11 +180,13 @@ def test_run_resume_from_previous(
     """Test run resumes from previous iteration count."""
     write_iteration(5, project_with_prompt)
 
-    mock_claude.set_responses([
-        {"status": "DONE", "output": "Done", "changes": []},
-        {"status": "DONE", "output": "Review", "changes": []},
-        {"status": "DONE", "output": "Review", "changes": []},
-    ])
+    mock_claude.set_responses(
+        [
+            {"status": "DONE", "output": "Done", "changes": []},
+            {"status": "DONE", "output": "Review", "changes": []},
+            {"status": "DONE", "output": "Review", "changes": []},
+        ]
+    )
 
     result = runner.invoke(app, ["run", "--max", "20"])
 

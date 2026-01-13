@@ -91,18 +91,14 @@ class TestHandleStatus:
 
     def test_stuck_exits_immediately(self, initialized_project: Path) -> None:
         """Test STUCK status exits with code 2."""
-        action, exit_code, done_count = handle_status(
-            Status.STUCK, [], 0, initialized_project
-        )
+        action, exit_code, done_count = handle_status(Status.STUCK, [], 0, initialized_project)
         assert action == "exit"
         assert exit_code == 2
         assert done_count == 0
 
     def test_done_without_changes_increments(self, initialized_project: Path) -> None:
         """Test DONE without changes increments done_count."""
-        action, exit_code, done_count = handle_status(
-            Status.DONE, [], 0, initialized_project
-        )
+        action, exit_code, done_count = handle_status(Status.DONE, [], 0, initialized_project)
         assert action == "continue"
         assert exit_code is None
         assert done_count == 1
@@ -119,9 +115,7 @@ class TestHandleStatus:
 
     def test_done_three_times_exits(self, initialized_project: Path) -> None:
         """Test DONE 3 times exits successfully."""
-        action, exit_code, done_count = handle_status(
-            Status.DONE, [], 2, initialized_project
-        )
+        action, exit_code, done_count = handle_status(Status.DONE, [], 2, initialized_project)
         assert action == "exit"
         assert exit_code == 0
         assert done_count == 3
@@ -139,18 +133,14 @@ class TestHandleStatus:
     def test_continue_resets_done_count(self, initialized_project: Path) -> None:
         """Test CONTINUE resets done_count if it was > 0."""
         write_done_count(1, initialized_project)
-        action, exit_code, done_count = handle_status(
-            Status.CONTINUE, [], 1, initialized_project
-        )
+        action, exit_code, done_count = handle_status(Status.CONTINUE, [], 1, initialized_project)
         assert action == "continue"
         assert exit_code is None
         assert done_count == 0
 
     def test_continue_with_zero_done_count(self, initialized_project: Path) -> None:
         """Test CONTINUE with zero done_count stays at zero."""
-        action, exit_code, done_count = handle_status(
-            Status.CONTINUE, [], 0, initialized_project
-        )
+        action, exit_code, done_count = handle_status(Status.CONTINUE, [], 0, initialized_project)
         assert action == "continue"
         assert exit_code is None
         assert done_count == 0

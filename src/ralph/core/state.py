@@ -83,7 +83,7 @@ def is_initialized(root: Path | None = None) -> bool:
 def read_file(path: Path, default: str = "") -> str:
     """Read a file, returning default if it doesn't exist."""
     try:
-        return path.read_text().strip()
+        return path.read_text(encoding="utf-8").strip()
     except FileNotFoundError:
         return default
 
@@ -91,7 +91,7 @@ def read_file(path: Path, default: str = "") -> str:
 def write_file(path: Path, content: str) -> None:
     """Write content to a file, creating parent directories if needed."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content)
+    path.write_text(content, encoding="utf-8")
 
 
 def read_iteration(root: Path | None = None) -> int:
@@ -198,5 +198,5 @@ def read_prompt_md(root: Path | None = None) -> str | None:
     prompt_path = root / "PROMPT.md"
     if not prompt_path.exists():
         return None
-    content = prompt_path.read_text().strip()
+    content = prompt_path.read_text(encoding="utf-8").strip()
     return content if content else None

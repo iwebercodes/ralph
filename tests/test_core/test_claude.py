@@ -56,9 +56,7 @@ class TestIsClaudeAvailable:
         assert is_claude_available() is False
 
     @pytest.mark.skipif(IS_WINDOWS, reason="Bash scripts don't work on Windows")
-    def test_when_available(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_when_available(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test returns True when claude is in PATH."""
         bin_dir = tmp_path / "bin"
         bin_dir.mkdir()
@@ -75,17 +73,13 @@ class TestInvokeClaude:
     """Tests for invoke_claude function."""
 
     @pytest.mark.skipif(IS_WINDOWS, reason="Bash scripts don't work on Windows")
-    def test_with_allowed_tools(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_with_allowed_tools(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test invoke_claude includes allowed_tools in command."""
         bin_dir = tmp_path / "bin"
         bin_dir.mkdir()
         mock_claude = bin_dir / "claude"
         # Create a mock that just echoes the arguments to verify they're passed
-        mock_claude.write_text(
-            '#!/bin/bash\necho "args: $@"'
-        )
+        mock_claude.write_text('#!/bin/bash\necho "args: $@"')
         mock_claude.chmod(mock_claude.stat().st_mode | stat.S_IEXEC)
 
         original_path = os.environ.get("PATH", "")
@@ -96,9 +90,7 @@ class TestInvokeClaude:
         assert "--allowedTools" in result.output
 
     @pytest.mark.skipif(IS_WINDOWS, reason="Bash scripts don't work on Windows")
-    def test_timeout_handling(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_timeout_handling(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test invoke_claude handles timeout."""
         bin_dir = tmp_path / "bin"
         bin_dir.mkdir()

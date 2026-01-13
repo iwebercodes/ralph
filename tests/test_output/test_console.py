@@ -62,18 +62,14 @@ class TestConsole:
         assert "5/20" in output
         assert "───" in output  # Visual separator
 
-    def test_iteration_info_non_tty_review(
-        self, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_iteration_info_non_tty_review(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Test iteration info in review mode for non-TTY."""
         console = Console(no_color=True)
         console.iteration_info(5, 20, 1)
         output = capsys.readouterr().out
         assert "[REVIEW]" in output
 
-    def test_rotation_complete_non_tty(
-        self, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_rotation_complete_non_tty(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Test rotation complete for non-TTY output."""
         console = Console(no_color=True)
         console.rotation_complete(Status.ROTATE, ["file1.py", "file2.py"], 0)
@@ -82,9 +78,7 @@ class TestConsole:
         assert "ROTATE" in output
         assert "2 files" in output
 
-    def test_rotation_complete_no_changes(
-        self, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_rotation_complete_no_changes(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Test rotation complete with no changes."""
         console = Console(no_color=True)
         console.rotation_complete(Status.DONE, [], 1)
@@ -100,9 +94,7 @@ class TestConsole:
         assert "[ralph]" in output
         assert "passed" in output
 
-    def test_test_result_failed_non_tty(
-        self, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_test_result_failed_non_tty(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Test failed test result for non-TTY output."""
         console = Console(no_color=True)
         console.test_result("pytest", 1, passed=False)
@@ -178,9 +170,7 @@ class TestConsoleTTY:
         assert "5" in output
         # Status line removed - box title shows working/reviewing state
 
-    def test_iteration_info_tty_review(
-        self, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_iteration_info_tty_review(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Test iteration info in review mode for TTY."""
         console = Console(no_color=True)
         console._is_tty = True
@@ -189,9 +179,7 @@ class TestConsoleTTY:
         assert "[REVIEW]" in output
         # REVIEWING status line removed - box title shows reviewing state
 
-    def test_rotation_complete_tty_rotate(
-        self, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_rotation_complete_tty_rotate(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Test rotation complete with ROTATE status for TTY."""
         console = Console(no_color=True)
         console._is_tty = True
@@ -201,9 +189,7 @@ class TestConsoleTTY:
         assert "ROTATE" in output
         assert "2 files" in output
 
-    def test_rotation_complete_tty_done(
-        self, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_rotation_complete_tty_done(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Test rotation complete with DONE status for TTY."""
         console = Console(no_color=True)
         console._is_tty = True
@@ -214,9 +200,7 @@ class TestConsoleTTY:
         assert "2/3" in output
         assert "[●●○]" in output
 
-    def test_rotation_complete_tty_done_complete(
-        self, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_rotation_complete_tty_done_complete(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Test rotation complete with DONE status at 3/3 for TTY."""
         console = Console(no_color=True)
         console._is_tty = True
@@ -225,9 +209,7 @@ class TestConsoleTTY:
         assert "3/3" in output
         assert "[●●●]" in output
 
-    def test_rotation_complete_tty_stuck(
-        self, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_rotation_complete_tty_stuck(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Test rotation complete with STUCK status for TTY."""
         console = Console(no_color=True)
         console._is_tty = True
@@ -235,9 +217,7 @@ class TestConsoleTTY:
         output = capsys.readouterr().out
         assert "STUCK" in output
 
-    def test_rotation_complete_tty_continue(
-        self, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_rotation_complete_tty_continue(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Test rotation complete with CONTINUE status for TTY."""
         console = Console(no_color=True)
         console._is_tty = True

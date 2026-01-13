@@ -66,6 +66,7 @@ def test_init_force_overwrites(initialized_project: Path) -> None:
     """Test init --force overwrites existing .ralph."""
     # Modify state
     from ralph.core.state import write_iteration
+
     write_iteration(5, initialized_project)
 
     result = runner.invoke(app, ["init", "--force"])
@@ -75,6 +76,7 @@ def test_init_force_overwrites(initialized_project: Path) -> None:
 
     # Check state was reset
     from ralph.core.state import read_iteration
+
     assert read_iteration(initialized_project) == 0
 
 

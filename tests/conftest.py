@@ -10,8 +10,6 @@ from pathlib import Path
 
 import pytest
 
-IS_WINDOWS = sys.platform == "win32"
-
 from ralph.core.state import (
     GUARDRAILS_TEMPLATE,
     HANDOFF_TEMPLATE,
@@ -24,6 +22,8 @@ from ralph.core.state import (
     write_iteration,
     write_status,
 )
+
+IS_WINDOWS = sys.platform == "win32"
 
 
 @pytest.fixture
@@ -67,6 +67,7 @@ class MockClaude:
     def __init__(self, project_path: Path):
         # Store mock files outside the project directory to avoid being tracked
         import tempfile
+
         self._mock_dir = Path(tempfile.mkdtemp())
         self._project_path = project_path
         self.responses: list[dict[str, object]] = []
@@ -142,6 +143,7 @@ sys.exit(0)
         """Set the responses the mock will return."""
         self.responses = responses
         import json
+
         self._responses_file.write_text(json.dumps(responses))
 
         # Reset call count
