@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.1.3 - Better Verification & Unicode Fix
+
+Improves the verification cycle and fixes a Windows bug that caused encoding errors.
+
+### Fixed
+
+- **Windows Unicode bug**: Files with emojis or non-ASCII characters (Chinese, Japanese, umlauts) now work correctly. Root cause: `Path.read_text()` defaulted to cp1252 on Windows instead of UTF-8.
+
+### Improved
+
+- **Separate IMPLEMENT and REVIEW prompts**: Previously both modes used identical instructions. Now REVIEW mode explicitly tells Claude to be skeptical, verify independently, and not trust the previous rotation's handoff blindly.
+- **Better guardrails guidance**: Added instructions on what makes good guardrails (specific, actionable, project-specific) and when to update them.
+- **Verification progress**: REVIEW mode now shows "verification pass 2 of 3" so Claude knows where it is in the cycle.
+
+### Added
+
+- **Cross-platform integration tests**:
+  - Full file-to-prompt pipeline tests
+  - Windows line endings (CRLF), UTF-8 BOM, mixed encodings
+  - Large files, special characters ({}, %, \)
+- **CI improvements**: `publish.yml` now tests on all 3 platforms before releasing to PyPI
+- **Mascot**: Added Ralph the supervisor dog to README
+
 ## v0.1.2 - Windows Compatibility
 
 Fixes for Windows platform support.
