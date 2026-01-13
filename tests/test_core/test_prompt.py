@@ -54,7 +54,7 @@ def test_assemble_prompt_review_mode() -> None:
 
 
 def test_assemble_prompt_contains_instructions() -> None:
-    """Test prompt contains all required sections."""
+    """Test IMPLEMENT prompt contains all required sections."""
     prompt = assemble_prompt(
         iteration=1,
         max_iter=20,
@@ -64,14 +64,36 @@ def test_assemble_prompt_contains_instructions() -> None:
         guardrails="Guardrails",
     )
 
-    # Check required sections
+    # Check required sections for IMPLEMENT mode
     assert "YOUR GOAL" in prompt
     assert "GUARDRAILS" in prompt
     assert "CURRENT STATE" in prompt
     assert "YOUR INSTRUCTIONS" in prompt
     assert "COMPLETION SIGNALS" in prompt
-    assert "COMPLETION PROTOCOL" in prompt
+    assert "Updating Guardrails" in prompt
     assert "RULES" in prompt
+
+
+def test_assemble_prompt_review_contains_verification() -> None:
+    """Test REVIEW prompt contains verification-specific sections."""
+    prompt = assemble_prompt(
+        iteration=5,
+        max_iter=20,
+        done_count=1,
+        goal="Goal",
+        handoff="Handoff",
+        guardrails="Guardrails",
+    )
+
+    # Check required sections for REVIEW mode
+    assert "[REVIEW]" in prompt
+    assert "CLAIMED STATE" in prompt
+    assert "DO NOT TRUST BLINDLY" in prompt
+    assert "Be Skeptical" in prompt
+    assert "Verify Independently" in prompt
+    assert "VERIFICATION PROTOCOL" in prompt
+    assert "verification pass 2 of 3" in prompt
+    assert "rubber-stamp" in prompt
 
 
 def test_assemble_prompt_contains_signals() -> None:
