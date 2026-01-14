@@ -66,7 +66,7 @@ def invoke_claude(
         return ClaudeResult(
             output=result.stdout,
             exit_code=result.returncode,
-            error=result.stderr if result.returncode != 0 else None,
+            error=result.stderr or None,
         )
     except subprocess.TimeoutExpired:
         return ClaudeResult(

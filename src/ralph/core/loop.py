@@ -23,6 +23,7 @@ from ralph.core.state import (
     write_done_count,
     write_history,
     write_iteration,
+    write_status,
 )
 
 
@@ -140,6 +141,11 @@ def run_iteration(
         handoff=handoff,
         guardrails=guardrails,
     )
+
+    # Reset status to IDLE before invoking Claude.
+    # This ensures each iteration starts with a known state - if Claude doesn't
+    # write a new status, we get IDLE instead of stale data from previous iteration.
+    write_status(Status.IDLE, root)
 
     # Invoke Claude
     result: ClaudeResult = invoke_claude(prompt)
