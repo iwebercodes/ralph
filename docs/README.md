@@ -19,6 +19,9 @@ Ralph supervises your AI coding agent to actually finish what it starts.
 **Want to understand how it works?**
 [How Ralph works](./how-it-works.md)
 
+**Using Ralph with an AI agent?**
+Run `ralph --about` to get a comprehensive explanation the agent can read.
+
 ## In a Hurry?
 
 ```bash

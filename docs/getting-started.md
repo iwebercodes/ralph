@@ -98,6 +98,16 @@ This approach prevents context pollution and catches premature "done" declaratio
 
 [Learn more about how Ralph works](./how-it-works.md)
 
+## Using Ralph with AI Agents
+
+If you're using Ralph inside an AI coding agent (Claude Code, Codex, etc.), run:
+
+```bash
+ralph --about
+```
+
+This prints a comprehensive explanation of how to use Ralph that the agent can read and understand, including commands, options, and exit codes.
+
 ## Next Steps
 
 - [Write better prompts](./writing-prompts.md) - Get more reliable results
