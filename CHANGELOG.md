@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.1.4 - Reliability Fix & AI Agent Support
+
+Fixes a bug that caused Ralph to get stuck in loops, and adds a way to teach AI agents how to use Ralph.
+
+### Fixed
+
+- **Stuck in endless loops**: Ralph could get stuck repeating "ROTATE" or "CONTINUE" forever without making progress. This happened when the status file wasn't cleared between iterations. Now each iteration starts fresh, so Ralph reliably moves forward.
+
+- **False "Goal achieved!" exits**: In rare cases, Ralph would declare success when work wasn't actually done. The fix ensures Ralph only sees completion signals that Claude actually sends, not leftover data from previous runs.
+
+### Added
+
+- **`ralph --about` flag**: Teaching an AI agent to use Ralph is now as simple as telling it to run `ralph --about`. The output explains everything the agent needs: how to invoke Ralph, what to put in PROMPT.md, command options, and exit codes. Perfect for using Ralph from Claude Code, Cursor, or other AI coding tools.
+
 ## v0.1.3 - Better Verification & Unicode Fix
 
 Improves the verification cycle and fixes a Windows bug that caused encoding errors.
