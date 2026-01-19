@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -157,6 +158,9 @@ class CodexAgent:
         cmd = [
             codex_path,
             "exec",
+            "-C",
+            os.getcwd(),
+            "--skip-git-repo-check",
             "--dangerously-bypass-approvals-and-sandbox",
             prompt,
         ]

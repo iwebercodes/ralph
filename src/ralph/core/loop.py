@@ -72,6 +72,7 @@ def format_log_entry(
     status: Status,
     files_changed: list[str],
     test_result: tuple[int, str] | None,
+    agent_error: str | None = None,
 ) -> str:
     """Format a log entry for history."""
     timestamp = datetime.now(timezone.utc).isoformat()
@@ -85,11 +86,25 @@ def format_log_entry(
         "",
         "--- AGENT OUTPUT ---",
         agent_output,
-        "",
-        "--- STATUS ---",
-        f"Signal: {status.value}",
-        f"Files Changed: {len(files_changed)}",
     ]
+
+    if agent_error:
+        lines.extend(
+            [
+                "",
+                "--- AGENT ERROR ---",
+                agent_error,
+            ]
+        )
+
+    lines.extend(
+        [
+            "",
+            "--- STATUS ---",
+            f"Signal: {status.value}",
+            f"Files Changed: {len(files_changed)}",
+        ]
+    )
 
     if files_changed:
         for f in files_changed:
@@ -185,6 +200,7 @@ def run_iteration(
         status=status,
         files_changed=files_changed,
         test_result=test_result,
+        agent_error=result.error,
     )
     write_history(iteration, log_content, root)
 
