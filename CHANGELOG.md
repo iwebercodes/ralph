@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.2.0 - Multi-Agent Support
+
+Ralph can now work with multiple AI agents and rotate between them when one hits rate limits.
+
+### Added
+
+- **Multiple agents**: Ralph now supports both Claude and Codex. When one agent hits rate limits, Ralph automatically switches to the other and keeps working.
+
+- **`--agents` option**: Filter which agents to use with `ralph run --agents claude` or `ralph run --agents codex`. Useful for testing or when you only have one CLI installed.
+
+- **Exit code 4**: New exit code when all agents are exhausted (rate limited). Wait for limits to reset, then run again.
+
+### Changed
+
+- **Agent abstraction**: Internally refactored from hardcoded Claude to a flexible Agent protocol. This makes it easier to add more agents in the future.
+
+- **History logs**: Now show which agent ran each rotation, making it easier to debug multi-agent sessions.
+
+### Fixed
+
+- **False exhaustion detection**: Previously, if your PROMPT.md mentioned "rate limit" (e.g., in test descriptions), Ralph might incorrectly think the agent was rate limited. Now only actual error messages trigger exhaustion.
+
 ## v0.1.4 - Reliability Fix & AI Agent Support
 
 Fixes a bug that caused Ralph to get stuck in loops, and adds a way to teach AI agents how to use Ralph.
