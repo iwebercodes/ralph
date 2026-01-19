@@ -19,7 +19,7 @@ What you want to accomplish (1-2 sentences).
 
 # Context (optional)
 
-Background info Claude needs to know.
+Background info the agent needs to know.
 
 # Constraints (optional)
 
@@ -93,7 +93,7 @@ Split this into three separate Ralph runs.
 Refactor the database layer.
 ```
 
-Without criteria, Claude doesn't know when to stop. Add:
+Without criteria, the agent doesn't know when to stop. Add:
 ```markdown
 # Success Criteria
 - [ ] Database logic is in src/db/ directory

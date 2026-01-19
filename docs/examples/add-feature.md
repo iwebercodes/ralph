@@ -54,7 +54,7 @@ This is a Next.js 14 app with:
 - "Name is required, minimum 2 characters" - try submitting with 1 character
 - "Success message appears" - submit valid form, see message
 
-**Useful context:** Claude knows the tech stack and where things are:
+**Useful context:** The agent knows the tech stack and where things are:
 - "App router (pages in src/app/)" - where to create the page
 - "Existing form components" - what to reuse
 - "SendGrid API key in..." - how to access credentials

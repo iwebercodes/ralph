@@ -73,8 +73,9 @@ The `ralph run` command returns different exit codes:
 | Code | Meaning |
 |------|---------|
 | 0 | Success - goal completed |
-| 2 | Claude signaled STUCK - needs human help |
+| 2 | Agent signaled STUCK - needs human help |
 | 3 | Hit max iterations - task may be too large |
+| 4 | All agents exhausted (rate limited) |
 | 1 | Other error |
 
 Use these in scripts:

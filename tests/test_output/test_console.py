@@ -129,6 +129,15 @@ class TestConsole:
         assert "Max iterations" in output
         assert "20" in output
 
+    def test_all_agents_exhausted_non_tty(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Test all agents exhausted for non-TTY output."""
+        console = Console(no_color=True)
+        console.all_agents_exhausted()
+        output = capsys.readouterr().out
+        assert "[ralph]" in output
+        assert "exhausted" in output.lower()
+        assert "rate limited" in output.lower()
+
 
 class TestConsoleTTY:
     """Tests for Console TTY output paths."""
@@ -147,7 +156,7 @@ class TestConsoleTTY:
         """Test working message for TTY."""
         console = Console(no_color=True)
         console._is_tty = True
-        console.working(done_count=0)
+        console.working(done_count=0, agent_name="Claude")
         output = capsys.readouterr().out
         assert "Claude working..." in output
         assert "──" in output
@@ -156,9 +165,25 @@ class TestConsoleTTY:
         """Test working message in review mode for TTY."""
         console = Console(no_color=True)
         console._is_tty = True
-        console.working(done_count=1)
+        console.working(done_count=1, agent_name="Claude")
         output = capsys.readouterr().out
         assert "Claude reviewing..." in output
+
+    def test_working_tty_codex(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Test working message for Codex agent."""
+        console = Console(no_color=True)
+        console._is_tty = True
+        console.working(done_count=0, agent_name="Codex")
+        output = capsys.readouterr().out
+        assert "Codex working..." in output
+
+    def test_working_review_tty_codex(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Test working message in review mode for Codex agent."""
+        console = Console(no_color=True)
+        console._is_tty = True
+        console.working(done_count=1, agent_name="Codex")
+        output = capsys.readouterr().out
+        assert "Codex reviewing..." in output
 
     def test_iteration_info_tty(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Test iteration info for TTY output."""
@@ -279,4 +304,15 @@ class TestConsoleTTY:
         assert "handoff.md" in output
         assert "ralph run" in output
         assert "ralph reset" in output
+        assert "─" in output
+
+    def test_all_agents_exhausted_tty(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Test all agents exhausted for TTY output."""
+        console = Console(no_color=True)
+        console._is_tty = True
+        console.all_agents_exhausted()
+        output = capsys.readouterr().out
+        assert "AGENTS EXHAUSTED" in output
+        assert "rate limited" in output.lower()
+        assert "ralph run" in output
         assert "─" in output

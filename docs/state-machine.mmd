@@ -1,0 +1,32 @@
+flowchart TD
+    START([Start]) --> RESET[Reset status to IDLE]
+
+    RESET --> AGENT[Agent works...]
+
+    AGENT --> SIGNAL{Agent signals}
+
+    SIGNAL -->|CONTINUE| RESET_COUNT[done_count = 0]
+    SIGNAL -->|ROTATE| RESET_COUNT
+    SIGNAL -->|STUCK| EXIT2[EXIT 2: blocked]
+    SIGNAL -->|DONE| CHECK_FILES{Files changed?}
+
+    CHECK_FILES -->|YES| RESET_COUNT
+    CHECK_FILES -->|NO| INCREMENT[done_count++]
+
+    INCREMENT --> CHECK_THREE{done_count ≥ 3?}
+
+    CHECK_THREE -->|YES| EXIT0[EXIT 0: success]
+    CHECK_THREE -->|NO| CHECK_MAX
+
+    RESET_COUNT --> CHECK_EXHAUSTED{Agent exhausted?}
+
+    CHECK_EXHAUSTED -->|YES| REMOVE_AGENT[Remove from pool]
+    CHECK_EXHAUSTED -->|NO| CHECK_MAX
+
+    REMOVE_AGENT --> CHECK_POOL{Pool empty?}
+
+    CHECK_POOL -->|YES| EXIT4[EXIT 4: all exhausted]
+    CHECK_POOL -->|NO| CHECK_MAX
+
+    CHECK_MAX{iteration < max?} -->|YES| RESET
+    CHECK_MAX -->|NO| EXIT3[EXIT 3: max iterations]

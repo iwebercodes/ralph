@@ -5,15 +5,18 @@ Execute the Ralph loop until the goal is complete or max iterations is reached.
 ## Usage
 
 ```bash
-ralph run [--max N] [--test-cmd CMD] [--no-color]
+ralph run [--max N] [--test-cmd CMD] [--agents NAMES] [--no-color]
 ```
 
 ## What It Does
 
-1. Builds a prompt from PROMPT.md and current state
-2. Runs Claude with that prompt
-3. Saves progress to handoff.md
-4. Repeats until Claude signals DONE (verified 3 times) or max iterations
+1. Discovers available AI agents (Claude, Codex, etc.)
+2. Builds a prompt from PROMPT.md and current state
+3. Runs an agent with that prompt
+4. Saves progress to handoff.md
+5. Repeats until the agent signals DONE (verified 3 times) or max iterations
+
+If an agent becomes rate limited, Ralph automatically rotates to another available agent.
 
 ## Options
 
@@ -21,6 +24,7 @@ ralph run [--max N] [--test-cmd CMD] [--no-color]
 |--------|-------------|---------|
 | `--max`, `-m` | Maximum iterations before stopping | 20 |
 | `--test-cmd`, `-t` | Command to run after each iteration | None |
+| `--agents`, `-a` | Comma-separated agent names to use | All available |
 | `--no-color` | Disable colored output | False |
 
 ## Examples
@@ -48,42 +52,64 @@ The test command runs after each rotation. Test results are logged but don't sto
 ralph run --no-color
 ```
 
+**Use only a specific agent:**
+```bash
+ralph run --agents claude        # Only use Claude
+ralph run --agents codex         # Only use Codex
+ralph run -a claude,codex        # Use both (explicit)
+```
+
+This is useful for testing with a specific agent or when you want to avoid using one temporarily.
+
 ## Output Explained
 
 ```
-RALPH  Supervising Claude...
+╭─────────────────────────────────────────────────────────╮
+│  RALPH LOOP                                             │
+│  Autonomous development with context rotation           │
+╰─────────────────────────────────────────────────────────╯
 
-[1/20] Working...
-  Signal: CONTINUE
-  Files changed: 3
+  ╭── Claude working... ──────────────────────────────────╮
+  │  Iteration:    1/20                                   │
+  ├── Rotation complete ──────────────────────────────────┤
+  │  Result:       CONTINUE                               │
+  │  Files:        3 files changed                        │
+  ╰───────────────────────────────────────────────────────╯
 
-[2/20] Working...
-  Signal: DONE
-  Files changed: 0 (1/3 verification)
+  ╭── Claude reviewing... ────────────────────────────────╮
+  │  Iteration:    2/20 [REVIEW]                          │
+  ├── Rotation complete ──────────────────────────────────┤
+  │  Result:       DONE                                   │
+  │  Files:        no changes                             │
+  │  Verification: 1/3 [●○○]                              │
+  ╰───────────────────────────────────────────────────────╯
 
-[3/20] Working...
-  Signal: DONE
-  Files changed: 0 (2/3 verification)
+  ╭── Codex working... ───────────────────────────────────╮
+  │  Iteration:    3/20                                   │
+  ...
 
-[4/20] Working...
-  Signal: DONE
-  Files changed: 0 (3/3 verification)
-
-Goal achieved in 4 rotations (2m 15s)
+  ╭───────────────────────────────────────────────────────╮
+  │  ✓ COMPLETE                                           │
+  │  Goal achieved after 4 iterations (3/3 verified)      │
+  │  Time: 2m 15s                                         │
+  ╰───────────────────────────────────────────────────────╯
 ```
 
-- **[1/20]** - Rotation number / max iterations
-- **Signal** - What Claude signaled ([see signals](../concepts/status-signals.md))
-- **Files changed** - How many files were modified
-- **Verification** - Progress toward 3x verification
+- **Agent name** - Shows which agent is working (Claude, Codex, etc.)
+- **Iteration** - Rotation number / max iterations
+- **[REVIEW]** - Indicates a verification rotation
+- **Result** - What the agent signaled ([see signals](../concepts/status-signals.md))
+- **Files** - How many files were modified
+- **Verification** - Progress toward 3x verification (shown on DONE)
 
 ## Exit Codes
 
 | Code | Meaning | What to do |
 |------|---------|------------|
 | 0 | Success | Goal completed! |
-| 2 | STUCK | Claude needs help. [See troubleshooting](../troubleshooting/ralph-stuck.md) |
+| 2 | STUCK | Agent needs help. [See troubleshooting](../troubleshooting/ralph-stuck.md) |
 | 3 | Max iterations | Task may be too large. [See troubleshooting](../troubleshooting/max-iterations.md) |
+| 4 | All agents exhausted | All agents rate limited. Wait and retry. [See troubleshooting](../troubleshooting/agent-errors.md) |
 | 1 | Error | Check error message |
 
 ## Interrupting
@@ -109,4 +135,5 @@ ralph run
 
 - [ralph status](./status.md) - Check state without running
 - [ralph reset](./reset.md) - Start fresh
+- [Agents](../concepts/agents.md) - How Ralph works with multiple agents
 - [Troubleshooting](../troubleshooting/index.md) - When things go wrong

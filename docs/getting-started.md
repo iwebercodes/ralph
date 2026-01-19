@@ -7,13 +7,21 @@ Get from zero to your first successful Ralph run in under 5 minutes.
 Before you start, you need:
 
 - **Python 3.10 or higher** - Check with `python --version`
-- **Claude CLI** - The command-line tool from Anthropic
+- **At least one AI agent CLI** - Claude CLI, Codex CLI, or both
 
-If you don't have Claude CLI installed, get it from [claude.ai/download](https://claude.ai/download). After installing, verify it works:
+### Supported AI Agents
 
-```bash
-claude --version
-```
+Ralph works with multiple AI agent CLIs. Install at least one:
+
+**Claude CLI** (from Anthropic):
+- Download from [claude.ai/download](https://claude.ai/download)
+- Verify: `claude --version`
+
+**Codex CLI** (from OpenAI):
+- Install from [github.com/openai/codex](https://github.com/openai/codex)
+- Verify: `codex --version`
+
+If you have both installed, Ralph uses them all and automatically rotates between them when one becomes rate limited. See [Agents](./concepts/agents.md) for details.
 
 ## Install Ralph
 
@@ -62,7 +70,7 @@ ralph run
 ```
 
 Ralph will:
-1. Start Claude working on your task
+1. Start an AI agent working on your task
 2. Save progress after each chunk of work
 3. Start fresh sessions as needed
 4. Verify completion 3 times before finishing
@@ -70,29 +78,43 @@ Ralph will:
 You'll see output like:
 
 ```
-RALPH  Supervising Claude...
+╭─────────────────────────────────────────────────────────╮
+│  RALPH LOOP                                             │
+│  Autonomous development with context rotation           │
+╰─────────────────────────────────────────────────────────╯
 
-[1/20] Working...
-  Signal: CONTINUE
-  Files changed: 3
+  ╭── Claude working... ──────────────────────────────────╮
+  │  Iteration:    1/20                                   │
+  ├── Rotation complete ──────────────────────────────────┤
+  │  Result:       CONTINUE                               │
+  │  Files:        3 files changed                        │
+  ╰───────────────────────────────────────────────────────╯
 
-[2/20] Working...
-  Signal: DONE
-  Files changed: 0 (1/3 verification)
+  ╭── Claude reviewing... ────────────────────────────────╮
+  │  Iteration:    2/20 [REVIEW]                          │
+  ├── Rotation complete ──────────────────────────────────┤
+  │  Result:       DONE                                   │
+  │  Files:        no changes                             │
+  │  Verification: 1/3 [●○○]                              │
+  ╰───────────────────────────────────────────────────────╯
 
 ...
 
-Goal achieved in 4 rotations (2m 15s)
+  ╭───────────────────────────────────────────────────────╮
+  │  ✓ COMPLETE                                           │
+  │  Goal achieved after 4 iterations (3/3 verified)      │
+  │  Time: 2m 15s                                         │
+  ╰───────────────────────────────────────────────────────╯
 ```
 
 ## What Just Happened?
 
-Ralph ran Claude in a loop:
+Ralph ran your AI agent in a loop:
 
-1. Claude worked on your task
-2. When Claude's context got full (or it said "done"), Ralph saved the state
-3. A fresh Claude session picked up where the last left off
-4. When Claude said "done" 3 times with no changes, Ralph confirmed completion
+1. The agent worked on your task
+2. When the agent's context got full (or it said "done"), Ralph saved the state
+3. A fresh session picked up where the last left off
+4. When the agent said "done" 3 times with no changes, Ralph confirmed completion
 
 This approach prevents context pollution and catches premature "done" declarations.
 

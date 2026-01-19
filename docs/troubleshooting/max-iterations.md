@@ -8,7 +8,7 @@ The loop ran 20 times (or your `--max` value) without completing. Possible reaso
 - Task is too large
 - Requirements are unclear
 - Something is preventing completion
-- Claude is going in circles
+- The agent is going in circles
 
 ## What to Do
 

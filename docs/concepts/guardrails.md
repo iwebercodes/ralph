@@ -1,16 +1,16 @@
 # Guardrails
 
-Guardrails are lessons Claude learns while working. They persist across rotations to prevent repeated mistakes.
+Guardrails are lessons agents learn while working. They persist across rotations to prevent repeated mistakes.
 
 ## What are Guardrails?
 
-As Claude works, it may discover important constraints or patterns:
+As an agent works, it may discover important constraints or patterns:
 
 - "Tests must pass before signaling DONE"
 - "The API uses camelCase, not snake_case"
 - "Never modify files in vendor/ directory"
 
-Instead of re-learning these each rotation, Claude writes them to guardrails.md. Future rotations see and follow them.
+Instead of re-learning these each rotation, the agent writes them to guardrails.md. Future rotations see and follow them.
 
 ## Example Guardrails
 
@@ -30,8 +30,8 @@ Instead of re-learning these each rotation, Claude writes them to guardrails.md.
 
 ## How They Work
 
-1. **Claude discovers something:** A pattern, constraint, or gotcha
-2. **Claude adds it to guardrails.md:** Written as a clear rule
+1. **Agent discovers something:** A pattern, constraint, or gotcha
+2. **Agent adds it to guardrails.md:** Written as a clear rule
 3. **Future rotations read it:** And follow the rule
 4. **Mistakes aren't repeated:** Lessons persist
 
@@ -80,7 +80,7 @@ You can edit `.ralph/guardrails.md` directly to add your own rules:
 - Tests must cover error cases, not just happy paths
 ```
 
-Claude will follow these alongside any it discovers.
+The agent will follow these alongside any it discovers.
 
 ## Related
 

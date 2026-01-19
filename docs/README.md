@@ -31,15 +31,17 @@ ralph init
 ralph run
 ```
 
-That's it. Ralph will keep Claude working until your goal is complete, verified 3 times.
+That's it. Ralph will keep your AI agent working until your goal is complete, verified 3 times.
 
 ## What is Ralph?
 
-When you give Claude Code a complex task, it can lose context, forget decisions, or declare "done" too early. Ralph fixes this by breaking work into fresh-context chunks and maintaining state between them.
+When you give an AI coding agent a complex task, it can lose context, forget decisions, or declare "done" too early. Ralph fixes this by breaking work into fresh-context chunks and maintaining state between them.
 
 Ralph is for anyone who:
-- Uses AI coding agents to build projects
+- Uses AI coding agents (Claude, Codex, etc.) to build projects
 - Gets frustrated when agents lose track of what they're doing
 - Wants reliable completion without constant supervision
+
+Ralph supports multiple AI agents and automatically rotates between them when one becomes exhausted (rate limited). See [Agents](./concepts/agents.md) for details.
 
 [Learn more about how Ralph works](./how-it-works.md)

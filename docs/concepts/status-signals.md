@@ -1,6 +1,6 @@
 # Status Signals
 
-Status signals tell Ralph what to do next. Claude writes a signal at the end of each rotation.
+Status signals tell Ralph what to do next. The agent writes a signal at the end of each rotation.
 
 ## The Four Signals
 
@@ -13,40 +13,50 @@ Status signals tell Ralph what to do next. Claude writes a signal at the end of 
 
 ## CONTINUE
 
-Claude signals CONTINUE when there's more work to do but the context is still usable.
+The agent signals CONTINUE when there's more work to do but the context is still usable.
 
 ```
-[3/20] Working...
-  Signal: CONTINUE
-  Files changed: 4
+  ╭── Claude working... ──────────────────────────────────╮
+  │  Iteration:    3/20                                   │
+  ├── Rotation complete ──────────────────────────────────┤
+  │  Result:       CONTINUE                               │
+  │  Files:        4 files changed                        │
+  ╰───────────────────────────────────────────────────────╯
 ```
 
 Ralph starts another rotation. The loop continues.
 
 ## ROTATE
 
-Claude signals ROTATE when it wants a fresh context before hitting limits. Maybe the conversation is getting long or confusing.
+The agent signals ROTATE when it wants a fresh context before hitting limits. Maybe the conversation is getting long or confusing.
 
 ```
-[5/20] Working...
-  Signal: ROTATE
-  Files changed: 2
+  ╭── Codex working... ───────────────────────────────────╮
+  │  Iteration:    5/20                                   │
+  ├── Rotation complete ──────────────────────────────────┤
+  │  Result:       ROTATE                                 │
+  │  Files:        2 files changed                        │
+  ╰───────────────────────────────────────────────────────╯
 ```
 
 Ralph starts another rotation. Similar to CONTINUE but explicitly requests fresh context.
 
 ## DONE
 
-Claude signals DONE when it believes the task is complete. Ralph doesn't trust this immediately.
+The agent signals DONE when it believes the task is complete. Ralph doesn't trust this immediately.
 
 ```
-[7/20] Working...
-  Signal: DONE
-  Files changed: 0 (1/3 verification)
+  ╭── Claude reviewing... ────────────────────────────────╮
+  │  Iteration:    7/20 [REVIEW]                          │
+  ├── Rotation complete ──────────────────────────────────┤
+  │  Result:       DONE                                   │
+  │  Files:        no changes                             │
+  │  Verification: 1/3 [●○○]                              │
+  ╰───────────────────────────────────────────────────────╯
 ```
 
 Ralph checks if files changed:
-- If files changed: Claude wasn't done, continue working
+- If files changed: the agent wasn't done, continue working
 - If no files changed: Count toward verification
 - After 3 DONEs with no changes: Task truly complete
 
@@ -54,23 +64,29 @@ See [Verification](./verification.md) for details.
 
 ## STUCK
 
-Claude signals STUCK when it genuinely needs human help. Something is blocking progress.
+The agent signals STUCK when it genuinely needs human help. Something is blocking progress.
 
 ```
-[4/20] Working...
-  Signal: STUCK
+  ╭── Claude working... ──────────────────────────────────╮
+  │  Iteration:    4/20                                   │
+  ├── Rotation complete ──────────────────────────────────┤
+  │  Result:       STUCK                                  │
+  │  Files:        no changes                             │
+  ╰───────────────────────────────────────────────────────╯
 
-Ralph stopped. Claude needs help.
-Check .ralph/handoff.md for details.
+  ╭───────────────────────────────────────────────────────╮
+  │  ✗ BLOCKED                                            │
+  │  Human input needed                                   │
+  ╰───────────────────────────────────────────────────────╯
 ```
 
-Ralph stops and returns exit code 2. Check handoff.md for what Claude needs.
+Ralph stops and returns exit code 2. Check handoff.md for what the agent needs.
 
 See [Troubleshooting STUCK](../troubleshooting/ralph-stuck.md) for solutions.
 
-## How Claude Signals
+## How Agents Signal
 
-Claude writes the signal to `.ralph/status`:
+The agent writes the signal to `.ralph/status`:
 
 ```
 DONE
@@ -93,5 +109,5 @@ When Ralph initializes, status is IDLE - no signal yet.
 ## Related
 
 - [Verification](./verification.md) - How DONE signals are verified
-- [Troubleshooting STUCK](../troubleshooting/ralph-stuck.md) - When Claude needs help
+- [Troubleshooting STUCK](../troubleshooting/ralph-stuck.md) - When an agent needs help
 - [ralph status](../commands/status.md) - Checking the current signal

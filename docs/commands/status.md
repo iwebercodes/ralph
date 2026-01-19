@@ -62,7 +62,7 @@ ralph status --json
 | Field | Meaning |
 |-------|---------|
 | Iteration | Current rotation / max allowed |
-| Status | Last signal from Claude ([see signals](../concepts/status-signals.md)) |
+| Status | Last signal from agent ([see signals](../concepts/status-signals.md)) |
 | Done count | Verification progress (0-3) |
 | Goal | First line of your PROMPT.md |
 

@@ -1,22 +1,22 @@
 # Ralph Says STUCK
 
-When Claude signals STUCK, it genuinely needs human help to continue.
+When an agent signals STUCK, it genuinely needs human help to continue.
 
 ## What STUCK Means
 
-Claude has hit something it cannot resolve on its own:
+The agent has hit something it cannot resolve on its own:
 - Missing information
 - Ambiguous requirements
 - External dependencies it cannot access
 - Permission or access issues
 
-This isn't a failure - it's Claude being honest about needing help.
+This isn't a failure - it's the agent being honest about needing help.
 
 ## What to Do
 
 ### 1. Read the handoff
 
-Claude explains what's blocking:
+The agent explains what's blocking:
 
 ```bash
 cat .ralph/handoff.md
@@ -26,7 +26,7 @@ Look in the "In Progress" or "Notes" section for the problem description.
 
 ### 2. Fix the issue
 
-Based on what Claude says:
+Based on what the agent says:
 - Provide missing information in PROMPT.md
 - Install missing dependencies
 - Fix permissions or access
@@ -100,7 +100,7 @@ Write clearer prompts from the start:
 
 See [Writing effective prompts](../writing-prompts.md).
 
-## If Claude Keeps Getting Stuck
+## If the Agent Keeps Getting Stuck
 
 If the same issue keeps causing STUCK:
 

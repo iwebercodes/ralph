@@ -4,12 +4,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ralph.core.agent import AgentResult
 from ralph.core.loop import (
     format_log_entry,
     handle_status,
+    run_loop,
     run_test_command,
 )
-from ralph.core.state import Status, write_done_count
+from ralph.core.pool import AgentPool
+from ralph.core.state import Status, write_done_count, write_status
 
 
 class TestRunTestCommand:
@@ -46,12 +49,13 @@ class TestFormatLogEntry:
         entry = format_log_entry(
             iteration=1,
             prompt="Test prompt",
-            claude_output="Test output",
+            agent_output="Test output",
+            agent_name="Claude",
             status=Status.CONTINUE,
             files_changed=[],
             test_result=None,
         )
-        assert "RALPH ROTATION 1" in entry
+        assert "RALPH ROTATION 1 [Claude]" in entry
         assert "Test prompt" in entry
         assert "Test output" in entry
         assert "CONTINUE" in entry
@@ -62,11 +66,13 @@ class TestFormatLogEntry:
         entry = format_log_entry(
             iteration=2,
             prompt="Prompt",
-            claude_output="Output",
+            agent_output="Output",
+            agent_name="Codex",
             status=Status.ROTATE,
             files_changed=["file1.py", "file2.py"],
             test_result=None,
         )
+        assert "RALPH ROTATION 2 [Codex]" in entry
         assert "Files Changed: 2" in entry
         assert "file1.py" in entry
         assert "file2.py" in entry
@@ -76,7 +82,8 @@ class TestFormatLogEntry:
         entry = format_log_entry(
             iteration=3,
             prompt="Prompt",
-            claude_output="Output",
+            agent_output="Output",
+            agent_name="Claude",
             status=Status.DONE,
             files_changed=[],
             test_result=(0, "All tests passed"),
@@ -144,3 +151,76 @@ class TestHandleStatus:
         assert action == "continue"
         assert exit_code is None
         assert done_count == 0
+
+
+class ExhaustingAgent:
+    """Mock agent that becomes exhausted after first invocation."""
+
+    def __init__(self, name: str = "Exhausting", root: Path | None = None):
+        self._name = name
+        self._root = root
+        self.invoke_count = 0
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    def is_available(self) -> bool:
+        return True
+
+    def invoke(self, prompt: str, timeout: int = 1800) -> AgentResult:
+        self.invoke_count += 1
+        if self._root:
+            write_status(Status.CONTINUE, self._root)
+        return AgentResult("Output", 0, "rate limit exceeded")
+
+    def is_exhausted(self, result: AgentResult) -> bool:
+        return result.error is not None and "rate limit" in result.error.lower()
+
+
+class TestRunLoopWithExhaustion:
+    """Tests for run_loop when agents become exhausted."""
+
+    def test_all_agents_exhausted_returns_exit_code_4(self, project_with_prompt: Path) -> None:
+        """Test that run_loop returns exit code 4 when all agents are exhausted."""
+        agent = ExhaustingAgent(root=project_with_prompt)
+        pool = AgentPool([agent])
+
+        result = run_loop(
+            max_iter=10,
+            test_cmd=None,
+            root=project_with_prompt,
+            agent_pool=pool,
+        )
+
+        assert result.exit_code == 4
+        assert "exhausted" in result.message.lower()
+
+    def test_multiple_agents_all_exhausted(self, project_with_prompt: Path) -> None:
+        """Test that all agents being exhausted triggers exit code 4."""
+        agent1 = ExhaustingAgent(name="Agent1", root=project_with_prompt)
+        agent2 = ExhaustingAgent(name="Agent2", root=project_with_prompt)
+        pool = AgentPool([agent1, agent2])
+
+        result = run_loop(
+            max_iter=10,
+            test_cmd=None,
+            root=project_with_prompt,
+            agent_pool=pool,
+        )
+
+        assert result.exit_code == 4
+
+    def test_empty_pool_returns_exit_code_4(self, project_with_prompt: Path) -> None:
+        """Test that an empty pool immediately returns exit code 4."""
+        pool = AgentPool([])
+
+        result = run_loop(
+            max_iter=10,
+            test_cmd=None,
+            root=project_with_prompt,
+            agent_pool=pool,
+        )
+
+        assert result.exit_code == 4
+        assert "exhausted" in result.message.lower()

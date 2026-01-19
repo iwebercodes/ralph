@@ -1,6 +1,6 @@
 # Verification
 
-Ralph doesn't trust the first "done" from Claude. Or the second. Verification ensures tasks are actually complete.
+Ralph doesn't trust the first "done" from an agent. Or the second. Verification ensures tasks are actually complete.
 
 ## Why Verify?
 
@@ -13,10 +13,10 @@ In normal use, you'd check the work yourself and point out what's missing. Ralph
 
 ## How It Works
 
-When Claude signals DONE:
+When an agent signals DONE:
 
 1. **Ralph checks:** Did any files change since last rotation?
-2. **If files changed:** Claude wasn't done. Continue working.
+2. **If files changed:** The agent wasn't done. Continue working.
 3. **If no files changed:** Count as one verification pass.
 4. **After 3 passes with no changes:** Task is truly complete.
 
@@ -36,9 +36,9 @@ Rotation 8: Signal DONE, 0 files changed
 
 ## What the Verification Catches
 
-**Last-minute changes:** Claude sometimes remembers something at the end and makes quick fixes. If it's still changing things, it's not done.
+**Last-minute changes:** Agents sometimes remember something at the end and make quick fixes. If they're still changing things, they're not done.
 
-**Premature completion:** When Claude says "done" but hasn't actually finished, subsequent rotations will make more changes (resetting verification).
+**Premature completion:** When an agent says "done" but hasn't actually finished, subsequent rotations will make more changes (resetting verification).
 
 **Overlooked requirements:** Fresh eyes in each rotation may catch things previous rotations missed.
 
@@ -46,9 +46,13 @@ Rotation 8: Signal DONE, 0 files changed
 
 In the output:
 ```
-[6/20] Working...
-  Signal: DONE
-  Files changed: 0 (1/3 verification)
+  ╭── Claude reviewing... ────────────────────────────────╮
+  │  Iteration:    6/20 [REVIEW]                          │
+  ├── Rotation complete ──────────────────────────────────┤
+  │  Result:       DONE                                   │
+  │  Files:        no changes                             │
+  │  Verification: 1/3 [●○○]                              │
+  ╰───────────────────────────────────────────────────────╯
 ```
 
 Or check status:
@@ -64,7 +68,7 @@ ralph status
 If Ralph keeps resetting verification (because files keep changing), the task may be:
 
 - **Too vague:** Success criteria aren't clear enough
-- **Scope creeping:** Claude keeps adding "improvements"
+- **Scope creeping:** The agent keeps adding "improvements"
 - **Unstable:** Something external is changing files
 
 See [Task not finishing](../troubleshooting/not-finishing.md) for solutions.

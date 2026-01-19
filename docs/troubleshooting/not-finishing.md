@@ -18,13 +18,13 @@ ralph history --list
 ```
 
 **Pattern: All CONTINUE, never DONE**
-Claude thinks there's always more work. Check if success criteria are achievable.
+The agent thinks there's always more work. Check if success criteria are achievable.
 
 **Pattern: DONE then file changes**
-Claude says done but then makes changes. Verification keeps resetting.
+The agent says done but then makes changes. Verification keeps resetting.
 
 **Pattern: Same work repeated**
-Look at several rotations - is Claude doing the same thing over and over?
+Look at several rotations - is the agent doing the same thing over and over?
 
 ### Check progress
 
@@ -44,7 +44,7 @@ ralph history 8
 ralph history 10
 ```
 
-Compare what Claude did. Is it making real progress?
+Compare what the agent did. Is it making real progress?
 
 ## Common Causes
 
@@ -78,7 +78,7 @@ Then run again for registration, password reset, etc.
 
 ### Scope creep
 
-Claude keeps finding "improvements" to make. Add constraints:
+The agent keeps finding "improvements" to make. Add constraints:
 
 ```markdown
 # Constraints
@@ -89,12 +89,12 @@ Claude keeps finding "improvements" to make. Add constraints:
 
 ### External state changing
 
-Something outside Claude is changing files:
+Something outside the agent is changing files:
 - Watch processes
 - Auto-formatters
 - Other tools
 
-Check if files change between rotations without Claude's action.
+Check if files change between rotations without the agent's action.
 
 ## Solutions
 
@@ -110,7 +110,7 @@ ralph run
 
 ### Add guardrails
 
-If Claude keeps making the same mistake:
+If the agent keeps making the same mistake:
 
 ```bash
 echo "RULE: Only modify files needed for the login feature" >> .ralph/guardrails.md

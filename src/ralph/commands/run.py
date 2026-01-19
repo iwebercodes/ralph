@@ -9,8 +9,9 @@ from pathlib import Path
 
 import typer
 
-from ralph.core.claude import is_claude_available
+from ralph.core.agent import Agent, ClaudeAgent, CodexAgent
 from ralph.core.loop import IterationResult, run_loop
+from ralph.core.pool import AgentPool
 from ralph.core.state import is_initialized, read_prompt_md, read_state
 from ralph.output.console import Console
 
@@ -28,6 +29,9 @@ def run(
     max_iterations: int = typer.Option(20, "--max", "-m", help="Maximum number of iterations"),
     test_cmd: str | None = typer.Option(
         None, "--test-cmd", "-t", help="Command to run after each iteration"
+    ),
+    agents: str | None = typer.Option(
+        None, "--agents", "-a", help="Comma-separated agent names (e.g., 'claude' or 'codex')"
     ),
     no_color: bool = typer.Option(False, "--no-color", help="Disable colored output"),
 ) -> None:
@@ -55,13 +59,58 @@ Example PROMPT.md:
         console.error("PROMPT.md not found or empty", hint)
         raise typer.Exit(1)
 
-    if not is_claude_available():
-        hint = """Ralph requires the Claude CLI to be installed.
-Install it from: https://claude.ai/download
+    # Build agent pool from available agents
+    all_agents: list[Agent] = [ClaudeAgent(), CodexAgent()]
 
-After installing, verify with: claude --version"""
-        console.error("claude CLI not found", hint)
+    # Filter by --agents option if specified
+    if agents is not None:
+        allowed = [name.strip().lower() for name in agents.split(",") if name.strip()]
+
+        if not allowed:
+            console.error(
+                "No agent names provided",
+                "Use --agents claude or --agents claude,codex",
+            )
+            raise typer.Exit(1)
+
+        # Validate: reject unknown agent names
+        known = {a.name.lower() for a in all_agents}
+        unknown = set(allowed) - known
+        if unknown:
+            available_names = ", ".join(a.name for a in all_agents)
+            console.error(
+                f"Unknown agent: {', '.join(sorted(unknown))}",
+                f"Available agents: {available_names}",
+            )
+            raise typer.Exit(1)
+
+        filtered = [a for a in all_agents if a.name.lower() in allowed]
+    else:
+        filtered = all_agents
+
+    # Check availability
+    available = [a for a in filtered if a.is_available()]
+
+    if not available:
+        if agents:
+            # User specified agents but none are available
+            unavailable = [a.name for a in filtered if not a.is_available()]
+            console.error(
+                f"Specified agent(s) not available: {', '.join(unavailable)}",
+                "Check that the CLI tool is installed and in PATH",
+            )
+        else:
+            hint = """Ralph requires at least one AI agent CLI to be installed.
+
+Supported agents:
+  - Claude CLI: https://claude.ai/download
+  - Codex CLI: https://openai.com/codex
+
+After installing, verify with: claude --version or codex --version"""
+            console.error("No AI agents available", hint)
         raise typer.Exit(1)
+
+    pool = AgentPool(available)
 
     # Handle Ctrl+C gracefully
     interrupted = False
@@ -83,11 +132,13 @@ After installing, verify with: claude --version"""
     # Show banner at start
     console.banner()
 
-    def on_iteration_start(iteration: int, max_iter: int, done_count: int) -> None:
-        console.working(done_count)
+    def on_iteration_start(iteration: int, max_iter: int, done_count: int, agent_name: str) -> None:
+        console.working(done_count, agent_name)
         console.iteration_info(iteration, max_iter, done_count)
 
-    def on_iteration_end(iteration: int, result: IterationResult, done_count: int) -> None:
+    def on_iteration_end(
+        iteration: int, result: IterationResult, done_count: int, agent_name: str
+    ) -> None:
         console.rotation_complete(
             result.status,
             result.files_changed,
@@ -108,6 +159,7 @@ After installing, verify with: claude --version"""
         max_iter=max_iterations,
         test_cmd=test_cmd,
         root=root,
+        agent_pool=pool,
         on_iteration_start=on_iteration_start,
         on_iteration_end=on_iteration_end,
     )
@@ -124,6 +176,9 @@ After installing, verify with: claude --version"""
     elif result.exit_code == 3:
         console.max_iterations(max_iterations)
         raise typer.Exit(3)
+    elif result.exit_code == 4:
+        console.all_agents_exhausted()
+        raise typer.Exit(4)
     else:
         console.error(result.message)
         raise typer.Exit(1)

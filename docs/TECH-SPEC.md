@@ -410,7 +410,7 @@ ralph/
 │       │   ├── loop.py     # Main loop logic
 │       │   ├── snapshot.py # File change detection
 │       │   ├── prompt.py   # Prompt building
-│       │   └── claude.py   # Claude CLI interaction
+│       │   └── agent.py    # Agent protocol + CLI interactions
 │       └── config/
 │           ├── __init__.py
 │           └── settings.py # Configuration handling
@@ -440,7 +440,7 @@ ralph/
 
 1. **Unit tests**: Test individual functions in `core/`
 2. **CLI tests**: Use Typer's `CliRunner` to test commands
-3. **Integration tests**: Test full loop with mock Claude responses
+3. **Integration tests**: Test full loop with mock agent responses
 
 Example CLI test:
 ```python

@@ -39,7 +39,7 @@ ralph run
 
 **One focus:** Each example does one thing well
 
-**Include context:** What Claude needs to know about your project
+**Include context:** What the agent needs to know about your project
 
 ## Next Steps
 

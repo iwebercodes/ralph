@@ -4,8 +4,11 @@ Ralph uses a few core concepts. Understanding them helps you use Ralph effective
 
 ## Key Concepts
 
+**[Agents](./agents.md)**
+The AI coding agents Ralph works with (Claude, Codex, etc.). Ralph manages them in a pool and rotates between them.
+
 **[Rotations](./rotations.md)**
-Each fresh Claude session in the loop. Ralph breaks work into rotations to keep context clean.
+Each fresh agent session in the loop. Ralph breaks work into rotations to keep context clean.
 
 **[Verification](./verification.md)**
 The 3x completion check. Ralph doesn't trust the first "done" - it verifies three times with no changes.
@@ -14,16 +17,21 @@ The 3x completion check. Ralph doesn't trust the first "done" - it verifies thre
 How state persists between rotations. The handoff.md file carries progress forward.
 
 **[Guardrails](./guardrails.md)**
-Lessons Claude learns while working. These persist across rotations to prevent repeated mistakes.
+Lessons agents learn while working. These persist across rotations to prevent repeated mistakes.
 
 **[Status Signals](./status-signals.md)**
-How Claude tells Ralph what to do next: CONTINUE, ROTATE, DONE, or STUCK.
+How agents tell Ralph what to do next: CONTINUE, ROTATE, DONE, or STUCK.
 
 ## How They Fit Together
 
 ```
                     ┌─────────────┐
                     │  PROMPT.md  │  (your goal)
+                    └──────┬──────┘
+                           │
+                           ▼
+                    ┌─────────────┐
+                    │ Agent Pool  │  (Claude, Codex, etc.)
                     └──────┬──────┘
                            │
         ┌──────────────────┼──────────────────┐

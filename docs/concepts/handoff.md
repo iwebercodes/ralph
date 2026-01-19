@@ -1,10 +1,10 @@
 # Handoff
 
-The handoff.md file is Ralph's memory between rotations. It carries progress, notes, and next steps from one Claude session to the next.
+The handoff.md file is Ralph's memory between rotations. It carries progress, notes, and next steps from one agent session to the next.
 
 ## What is Handoff?
 
-Each rotation starts fresh - Claude has no memory of previous rotations. Handoff.md bridges this gap by providing:
+Each rotation starts fresh - the agent has no memory of previous rotations. Handoff.md bridges this gap by providing:
 
 - What's been completed
 - What's in progress
@@ -41,10 +41,10 @@ Working on login endpoint.
 
 ## How It Works
 
-1. **Rotation starts:** Claude reads handoff.md to understand current state
-2. **During work:** Claude makes progress on the task
-3. **Before signaling:** Claude updates handoff.md with new progress
-4. **Next rotation:** New Claude session reads the updated handoff
+1. **Rotation starts:** The agent reads handoff.md to understand current state
+2. **During work:** The agent makes progress on the task
+3. **Before signaling:** The agent updates handoff.md with new progress
+4. **Next rotation:** A new agent session reads the updated handoff
 
 The handoff is the only way information persists between rotations (along with guardrails and actual file changes).
 
@@ -56,7 +56,7 @@ The file is at `.ralph/handoff.md`:
 cat .ralph/handoff.md
 ```
 
-You can read it anytime to see what Claude thinks the current state is.
+You can read it anytime to see what the agent thinks the current state is.
 
 ## If Handoff Gets Corrupted
 

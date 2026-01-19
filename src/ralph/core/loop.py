@@ -8,8 +8,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import NamedTuple
 
-from ralph.core.claude import ClaudeResult, invoke_claude
+from ralph.core.agent import Agent, AgentResult
 from ralph.core.ignore import create_spec, load_ignore_patterns
+from ralph.core.pool import AgentPool
 from ralph.core.prompt import assemble_prompt
 from ralph.core.snapshot import compare_snapshots, take_snapshot
 from ralph.core.state import (
@@ -33,7 +34,8 @@ class IterationResult(NamedTuple):
     status: Status
     files_changed: list[str]
     test_result: tuple[int, str] | None  # (exit_code, output) or None
-    claude_output: str
+    claude_output: str  # Kept for backward compatibility
+    agent_result: AgentResult | None = None  # Full result for exhaustion checking
 
 
 class LoopResult(NamedTuple):
@@ -65,7 +67,8 @@ def run_test_command(cmd: str) -> tuple[int, str]:
 def format_log_entry(
     iteration: int,
     prompt: str,
-    claude_output: str,
+    agent_output: str,
+    agent_name: str,
     status: Status,
     files_changed: list[str],
     test_result: tuple[int, str] | None,
@@ -74,14 +77,14 @@ def format_log_entry(
     timestamp = datetime.now(timezone.utc).isoformat()
     lines = [
         "=" * 80,
-        f"RALPH ROTATION {iteration} - {timestamp}",
+        f"RALPH ROTATION {iteration} [{agent_name}] - {timestamp}",
         "=" * 80,
         "",
         "--- PROMPT SENT ---",
         prompt,
         "",
-        "--- CLAUDE OUTPUT ---",
-        claude_output,
+        "--- AGENT OUTPUT ---",
+        agent_output,
         "",
         "--- STATUS ---",
         f"Signal: {status.value}",
@@ -113,9 +116,18 @@ def run_iteration(
     iteration: int,
     max_iter: int,
     test_cmd: str | None,
+    agent: Agent,
     root: Path | None = None,
 ) -> IterationResult:
-    """Run a single iteration of the loop."""
+    """Run a single iteration of the loop.
+
+    Args:
+        iteration: Current iteration number
+        max_iter: Maximum number of iterations
+        test_cmd: Optional test command to run after the iteration
+        agent: The agent to use for this iteration
+        root: Project root directory
+    """
     if root is None:
         root = Path.cwd()
 
@@ -142,13 +154,13 @@ def run_iteration(
         guardrails=guardrails,
     )
 
-    # Reset status to IDLE before invoking Claude.
-    # This ensures each iteration starts with a known state - if Claude doesn't
+    # Reset status to IDLE before invoking agent.
+    # This ensures each iteration starts with a known state - if the agent doesn't
     # write a new status, we get IDLE instead of stale data from previous iteration.
     write_status(Status.IDLE, root)
 
-    # Invoke Claude
-    result: ClaudeResult = invoke_claude(prompt)
+    # Invoke agent
+    result: AgentResult = agent.invoke(prompt)
 
     # Parse status
     status = read_status(root)
@@ -168,7 +180,8 @@ def run_iteration(
     log_content = format_log_entry(
         iteration=iteration,
         prompt=prompt,
-        claude_output=result.output,
+        agent_output=result.output,
+        agent_name=agent.name,
         status=status,
         files_changed=files_changed,
         test_result=test_result,
@@ -180,6 +193,7 @@ def run_iteration(
         files_changed=files_changed,
         test_result=test_result,
         claude_output=result.output,
+        agent_result=result,
     )
 
 
@@ -222,8 +236,9 @@ def run_loop(
     max_iter: int = 20,
     test_cmd: str | None = None,
     root: Path | None = None,
-    on_iteration_start: Callable[[int, int, int], None] | None = None,
-    on_iteration_end: Callable[[int, IterationResult, int], None] | None = None,
+    agent_pool: AgentPool | None = None,
+    on_iteration_start: Callable[[int, int, int, str], None] | None = None,
+    on_iteration_end: Callable[[int, IterationResult, int, str], None] | None = None,
 ) -> LoopResult:
     """Run the main Ralph loop.
 
@@ -231,8 +246,9 @@ def run_loop(
         max_iter: Maximum number of iterations
         test_cmd: Optional test command to run after each iteration
         root: Project root directory
-        on_iteration_start: Callback(iteration, max_iter, done_count)
-        on_iteration_end: Callback(iteration, result, done_count)
+        agent_pool: Pool of agents to use (required)
+        on_iteration_start: Callback(iteration, max_iter, done_count, agent_name)
+        on_iteration_end: Callback(iteration, result, done_count, agent_name)
 
     Returns:
         LoopResult with exit code, message, and iterations run
@@ -240,19 +256,36 @@ def run_loop(
     if root is None:
         root = Path.cwd()
 
+    if agent_pool is None:
+        raise ValueError("agent_pool is required")
+
     iteration = read_iteration(root)
     done_count = read_done_count(root)
     iterations_run = 0
 
     while iteration < max_iter:
+        # Check if we have any agents left
+        if agent_pool.is_empty():
+            return LoopResult(4, "All agents exhausted", iterations_run)
+
+        # Select an agent for this iteration
+        agent = agent_pool.select_random()
+
         iteration += 1
         write_iteration(iteration, root)
         iterations_run += 1
 
         if on_iteration_start:
-            on_iteration_start(iteration, max_iter, done_count)
+            on_iteration_start(iteration, max_iter, done_count, agent.name)
 
-        result = run_iteration(iteration, max_iter, test_cmd, root)
+        result = run_iteration(iteration, max_iter, test_cmd, agent, root)
+
+        # Check if agent is exhausted
+        if result.agent_result and agent.is_exhausted(result.agent_result):
+            agent_pool.remove(agent)
+            # If this was our last agent, exit
+            if agent_pool.is_empty():
+                return LoopResult(4, "All agents exhausted", iterations_run)
 
         action, exit_code, done_count = handle_status(
             result.status,
@@ -262,7 +295,7 @@ def run_loop(
         )
 
         if on_iteration_end:
-            on_iteration_end(iteration, result, done_count)
+            on_iteration_end(iteration, result, done_count, agent.name)
 
         if action == "exit":
             if exit_code == 0:

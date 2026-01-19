@@ -46,7 +46,7 @@ Reset complete.
 ralph reset --keep-guardrails
 ```
 
-Use this when starting a new task in the same project. Guardrails contain useful lessons Claude learned (e.g., "always run tests before marking done").
+Use this when starting a new task in the same project. Guardrails contain useful lessons the agent learned (e.g., "always run tests before marking done").
 
 **Keep history (for debugging):**
 ```bash

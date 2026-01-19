@@ -87,7 +87,7 @@ ralph run
 ```
 
 Expected flow:
-1. Claude reads current route files
+1. The agent reads current route files
 2. Creates repository directory structure
 3. Extracts queries into repositories
 4. Updates routes to use repositories
@@ -96,7 +96,7 @@ Expected flow:
 
 ## Key Refactoring Patterns
 
-**Include "before" examples:** Show Claude what the current code looks like.
+**Include "before" examples:** Show what the current code looks like.
 
 **Define the end state:** What should the structure be when done?
 

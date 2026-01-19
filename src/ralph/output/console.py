@@ -84,10 +84,10 @@ class Console:
             self._print(c(f"  ╰{line}╯"))
             self._print()
 
-    def working(self, done_count: int = 0) -> None:
-        """Show that Claude is working/reviewing - opens the iteration box."""
+    def working(self, done_count: int = 0, agent_name: str = "Agent") -> None:
+        """Show that an agent is working/reviewing - opens the iteration box."""
         if self._is_tty:
-            title = "Claude reviewing..." if done_count > 0 else "Claude working..."
+            title = f"{agent_name} reviewing..." if done_count > 0 else f"{agent_name} working..."
             self._print(self._box_top(title))
 
     def iteration_info(self, iteration: int, max_iter: int, done_count: int) -> None:
@@ -214,6 +214,28 @@ class Console:
             self._print()
         else:
             self._print("[ralph] BLOCKED - see .ralph/handoff.md for next steps")
+
+    def all_agents_exhausted(self) -> None:
+        """Print message when all agents are exhausted (rate limited)."""
+        if self._is_tty:
+            line = "─" * self.BOX_WIDTH
+            yellow = self._colors.yellow
+            self._print()
+            self._print(yellow(f"  ╭{line}╮"))
+            title = self._colors.bold(yellow("  ⚠ AGENTS EXHAUSTED"))
+            padding = self.BOX_WIDTH - 20
+            self._print(yellow("  │") + title + " " * padding + yellow("│"))
+            msg = "  All agents rate limited"
+            msg_padding = self.BOX_WIDTH - len(msg)
+            self._print(yellow("  │") + msg + " " * msg_padding + yellow("│"))
+            self._print(yellow(f"  ╰{line}╯"))
+            self._print()
+            self._print("  Next steps:")
+            self._print("    1. Wait for rate limits to reset")
+            self._print("    2. Run: ralph run")
+            self._print()
+        else:
+            self._print("[ralph] All agents exhausted (rate limited)")
 
     def max_iterations(self, max_iter: int) -> None:
         """Print max iterations reached message."""

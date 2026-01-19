@@ -58,12 +58,12 @@ When removing an item from the shopping cart, the total doesn't update correctly
 - Don't break existing functionality
 - Add a test to prevent regression
 
-**Located context:** Claude knows exactly where to look:
+**Located context:** The agent knows exactly where to look:
 - The hook that needs fixing
 - The component that uses it
 - Where tests live
 
-**Bounded scope:** "Don't refactor beyond fixing this bug" prevents Claude from rewriting the whole cart system.
+**Bounded scope:** "Don't refactor beyond fixing this bug" prevents the agent from rewriting the whole cart system.
 
 ## Running It
 
@@ -74,7 +74,7 @@ ralph run
 ```
 
 Expected flow:
-1. Claude reads the cart hook code
+1. The agent reads the cart hook code
 2. Identifies the calculation issue
 3. Fixes the logic
 4. Adds a test
@@ -117,7 +117,7 @@ Users report being logged out unexpectedly. No clear pattern found yet.
 - [ ] Explain the fix in handoff notes
 ```
 
-This gives Claude license to investigate rather than just fix.
+This gives the agent license to investigate rather than just fix.
 
 ## Related
 

@@ -17,8 +17,8 @@ WORKFLOW
 3. Start:       ralph run
 4. Check:       ralph status
 
-Ralph runs Claude in fresh-context rotations until the goal is complete. When
-completion is signaled, Ralph verifies 3 times with fresh context before
+Ralph runs available AI agents in fresh-context rotations until the goal is complete.
+When completion is signaled, Ralph verifies 3 times with fresh context before
 declaring success.
 
 WHAT TO PUT IN PROMPT.md
@@ -42,10 +42,11 @@ COMMANDS
       Initialize Ralph in the current directory.
       --force: Overwrite existing .ralph/ directory
 
-  ralph run [--max N] [--test-cmd "..."] [--no-color]
+  ralph run [--max N] [--test-cmd "..."] [--agents NAMES] [--no-color]
       Execute rotations until the goal is complete.
       --max N: Maximum iterations (default: 20)
       --test-cmd: Command to run after each iteration
+      --agents: Comma-separated agent names to use (e.g., "claude,codex")
 
   ralph status [--json]
       Show current state without running.
@@ -71,6 +72,7 @@ EXIT CODES
   0   Success — goal completed and verified
   2   Stuck — needs human intervention
   3   Max iterations reached — increase --max or simplify goal
+  4   All agents exhausted — wait for rate limits to reset
 
 HOW RALPH WORKS
 ---------------
@@ -83,7 +85,7 @@ premature completion:
   3. When "DONE" is signaled, Ralph verifies 3x with fresh context
   4. Only after 3 consecutive verifications is the goal truly complete
 
-The supervised Claude handles internal protocol (handoff.md, guardrails.md,
+The supervised agent handles internal protocol (handoff.md, guardrails.md,
 status signals). You just write PROMPT.md and run Ralph.
 """
 

@@ -13,7 +13,7 @@ ralph history [ROTATION] [--list] [--tail N]
 Each rotation is logged to `.ralph/history/N.log`. This command helps you:
 - See what happened in previous rotations
 - Debug why a task is stuck
-- Understand what Claude did and when
+- Understand what the agent did and when
 
 ## Options
 
@@ -68,20 +68,20 @@ Files Changed: 0
 
 ---
 
-[Full Claude output from this rotation]
+[Full agent output from this rotation]
 ```
 
 Key things to look for:
-- **Signal** - What Claude signaled at the end
+- **Signal** - What the agent signaled at the end
 - **Files Changed** - How many files were modified
-- **Output** - What Claude actually did
+- **Output** - What the agent actually did
 
 ## Debugging with History
 
 **Task keeps running but not finishing:**
 1. Run `ralph history --list` to see the pattern
 2. Look at recent rotations - is work being repeated?
-3. Check if Claude is making progress or going in circles
+3. Check if the agent is making progress or going in circles
 
 **Understanding a past run:**
 1. Run `ralph history 1` to see the first rotation

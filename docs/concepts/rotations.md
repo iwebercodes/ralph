@@ -1,10 +1,10 @@
 # Rotations
 
-A rotation is one Claude session in Ralph's loop. Understanding rotations helps you understand how Ralph maintains quality over long tasks.
+A rotation is one agent session in Ralph's loop. Understanding rotations helps you understand how Ralph maintains quality over long tasks.
 
 ## What is a Rotation?
 
-Each time Ralph calls Claude, that's one rotation. Claude works on the task, makes progress, and signals when done or ready for a fresh start.
+Each time Ralph calls an agent, that's one rotation. The agent works on the task, makes progress, and signals when done or ready for a fresh start.
 
 Think of it like shifts at work:
 - Worker 1 does their part, writes notes for the next person
@@ -27,13 +27,14 @@ No conversation history. No accumulated confusion.
 
 ## What Happens Each Rotation
 
-1. **Ralph builds a prompt** from your PROMPT.md plus current state
-2. **Claude receives the prompt** with fresh context
-3. **Claude works** on the task
-4. **Claude updates handoff.md** with progress and notes
-5. **Claude signals status** (CONTINUE, DONE, ROTATE, STUCK)
-6. **Ralph logs the rotation** to history
-7. **Next rotation begins** (if needed)
+1. **Ralph picks an agent** from the available pool
+2. **Ralph builds a prompt** from your PROMPT.md plus current state
+3. **Agent receives the prompt** with fresh context
+4. **Agent works** on the task
+5. **Agent updates handoff.md** with progress and notes
+6. **Agent signals status** (CONTINUE, DONE, ROTATE, STUCK)
+7. **Ralph logs the rotation** to history
+8. **Next rotation begins** (if needed)
 
 ## Iteration vs Rotation
 
@@ -61,10 +62,11 @@ ralph history
 ralph run --max 30
 ```
 
-**Manual rotation:** Claude can signal ROTATE when it wants a fresh context before hitting limits.
+**Manual rotation:** An agent can signal ROTATE when it wants a fresh context before hitting limits.
 
 ## Related
 
+- [Agents](./agents.md) - The AI agents that run in rotations
 - [Handoff](./handoff.md) - What persists between rotations
-- [Status signals](./status-signals.md) - How Claude controls the loop
+- [Status signals](./status-signals.md) - How agents control the loop
 - [How it works](../how-it-works.md) - The big picture
