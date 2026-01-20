@@ -29,12 +29,12 @@ class Agent(Protocol):
         """Check if this agent's CLI is available."""
         ...
 
-    def invoke(self, prompt: str, timeout: int = 1800) -> AgentResult:
+    def invoke(self, prompt: str, timeout: int | None = 10800) -> AgentResult:
         """Invoke the agent with a prompt.
 
         Args:
             prompt: The prompt to send to the agent
-            timeout: Timeout in seconds (default 30 minutes)
+            timeout: Timeout in seconds (default 3 hours), None for no timeout
 
         Returns:
             AgentResult with output, exit code, and any error message
@@ -73,7 +73,7 @@ class ClaudeAgent:
         """Check if claude CLI is available in PATH."""
         return shutil.which("claude") is not None
 
-    def invoke(self, prompt: str, timeout: int = 1800) -> AgentResult:
+    def invoke(self, prompt: str, timeout: int | None = 10800) -> AgentResult:
         """Invoke Claude CLI with the given prompt."""
         claude_path = shutil.which("claude")
         if claude_path is None:
@@ -145,7 +145,7 @@ class CodexAgent:
         """Check if codex CLI is available in PATH."""
         return shutil.which("codex") is not None
 
-    def invoke(self, prompt: str, timeout: int = 1800) -> AgentResult:
+    def invoke(self, prompt: str, timeout: int | None = 10800) -> AgentResult:
         """Invoke Codex CLI with the given prompt."""
         codex_path = shutil.which("codex")
         if codex_path is None:

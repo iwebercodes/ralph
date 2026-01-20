@@ -133,6 +133,7 @@ def run_iteration(
     test_cmd: str | None,
     agent: Agent,
     root: Path | None = None,
+    timeout: int | None = 10800,
 ) -> IterationResult:
     """Run a single iteration of the loop.
 
@@ -142,6 +143,7 @@ def run_iteration(
         test_cmd: Optional test command to run after the iteration
         agent: The agent to use for this iteration
         root: Project root directory
+        timeout: Timeout in seconds for agent invocation (default 3 hours), None for no timeout
     """
     if root is None:
         root = Path.cwd()
@@ -175,7 +177,7 @@ def run_iteration(
     write_status(Status.IDLE, root)
 
     # Invoke agent
-    result: AgentResult = agent.invoke(prompt)
+    result: AgentResult = agent.invoke(prompt, timeout=timeout)
 
     # Parse status
     status = read_status(root)
@@ -255,6 +257,7 @@ def run_loop(
     agent_pool: AgentPool | None = None,
     on_iteration_start: Callable[[int, int, int, str], None] | None = None,
     on_iteration_end: Callable[[int, IterationResult, int, str], None] | None = None,
+    timeout: int | None = 10800,
 ) -> LoopResult:
     """Run the main Ralph loop.
 
@@ -265,6 +268,7 @@ def run_loop(
         agent_pool: Pool of agents to use (required)
         on_iteration_start: Callback(iteration, max_iter, done_count, agent_name)
         on_iteration_end: Callback(iteration, result, done_count, agent_name)
+        timeout: Timeout in seconds per rotation (default 3 hours), None for no timeout
 
     Returns:
         LoopResult with exit code, message, and iterations run
@@ -294,7 +298,7 @@ def run_loop(
         if on_iteration_start:
             on_iteration_start(iteration, max_iter, done_count, agent.name)
 
-        result = run_iteration(iteration, max_iter, test_cmd, agent, root)
+        result = run_iteration(iteration, max_iter, test_cmd, agent, root, timeout)
 
         # Check if agent is exhausted
         if result.agent_result and agent.is_exhausted(result.agent_result):

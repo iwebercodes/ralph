@@ -33,6 +33,12 @@ def run(
     agents: str | None = typer.Option(
         None, "--agents", "-a", help="Comma-separated agent names (e.g., 'claude' or 'codex')"
     ),
+    timeout: int | None = typer.Option(
+        10800, "--timeout", help="Timeout per rotation in seconds (default: 3 hours)"
+    ),
+    no_timeout: bool = typer.Option(
+        False, "--no-timeout", help="Disable timeout entirely (run until completion)"
+    ),
     no_color: bool = typer.Option(False, "--no-color", help="Disable colored output"),
 ) -> None:
     """Execute the Ralph loop until completion or max iterations."""
@@ -155,6 +161,9 @@ After installing, verify with: claude --version or codex --version"""
 
         console.close_iteration()
 
+    # Handle timeout options
+    effective_timeout: int | None = None if no_timeout else timeout
+
     result = run_loop(
         max_iter=max_iterations,
         test_cmd=test_cmd,
@@ -162,6 +171,7 @@ After installing, verify with: claude --version or codex --version"""
         agent_pool=pool,
         on_iteration_start=on_iteration_start,
         on_iteration_end=on_iteration_end,
+        timeout=effective_timeout,
     )
 
     duration = time.time() - start_time
