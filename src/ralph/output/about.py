@@ -15,7 +15,8 @@ WORKFLOW
 1. Initialize:  ralph init
 2. Write the task goal and success criteria to PROMPT.md
 3. Start:       ralph run
-4. Check:       ralph status
+4. Inspect:     ralph inspect
+5. Check:       ralph status
 
 Ralph runs available AI agents in fresh-context rotations until the goal is complete.
 When completion is signaled, Ralph verifies 3 times with fresh context before
@@ -47,6 +48,11 @@ COMMANDS
       --max N: Maximum iterations (default: 20)
       --test-cmd: Command to run after each iteration
       --agents: Comma-separated agent names to use (e.g., "claude,codex")
+
+  ralph inspect [--follow] [--json]
+      Inspect a running Ralph session.
+      --follow: Tail the live agent output log
+      --json: Output as JSON
 
   ralph status [--json]
       Show current state without running.

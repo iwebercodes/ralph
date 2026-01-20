@@ -76,5 +76,6 @@ ralph status --json
 
 ## Related
 
+- [ralph inspect](./inspect.md) - Inspect a running session and tail output
 - [ralph run](./run.md) - Continue or start execution
 - [Status signals](../concepts/status-signals.md) - What each status means

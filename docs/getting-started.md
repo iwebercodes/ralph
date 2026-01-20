@@ -107,6 +107,20 @@ You'll see output like:
   ╰───────────────────────────────────────────────────────╯
 ```
 
+### 4. Inspect Live Progress (Optional)
+
+From another terminal, you can see live status while Ralph is running:
+
+```bash
+ralph inspect
+```
+
+To follow the live agent output:
+
+```bash
+ralph inspect --follow
+```
+
 ## What Just Happened?
 
 Ralph ran your AI agent in a loop:

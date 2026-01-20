@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -12,6 +13,13 @@ from ralph.core.agent import Agent, AgentResult
 from ralph.core.ignore import create_spec, load_ignore_patterns
 from ralph.core.pool import AgentPool
 from ralph.core.prompt import assemble_prompt
+from ralph.core.run_state import (
+    RunState,
+    delete_run_state,
+    get_current_log_path,
+    now_iso,
+    write_run_state,
+)
 from ralph.core.snapshot import compare_snapshots, take_snapshot
 from ralph.core.state import (
     Status,
@@ -134,6 +142,7 @@ def run_iteration(
     agent: Agent,
     root: Path | None = None,
     timeout: int | None = 10800,
+    output_file: Path | None = None,
 ) -> IterationResult:
     """Run a single iteration of the loop.
 
@@ -176,8 +185,13 @@ def run_iteration(
     # write a new status, we get IDLE instead of stale data from previous iteration.
     write_status(Status.IDLE, root)
 
+    # Truncate live output log for this iteration
+    if output_file is not None:
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_file.write_text("", encoding="utf-8")
+
     # Invoke agent
-    result: AgentResult = agent.invoke(prompt, timeout=timeout)
+    result: AgentResult = agent.invoke(prompt, timeout=timeout, output_file=output_file)
 
     # Parse status
     status = read_status(root)
@@ -282,47 +296,86 @@ def run_loop(
     iteration = read_iteration(root)
     done_count = read_done_count(root)
     iterations_run = 0
+    started_at = now_iso()
 
-    while iteration < max_iter:
-        # Check if we have any agents left
-        if agent_pool.is_empty():
-            return LoopResult(4, "All agents exhausted", iterations_run)
+    initial_state = RunState(
+        pid=os.getpid(),
+        started_at=started_at,
+        iteration=iteration,
+        max_iterations=max_iter,
+        agent="pending",
+        agent_started_at=started_at,
+    )
+    write_run_state(initial_state, root)
 
-        # Select an agent for this iteration
-        agent = agent_pool.select_random()
-
-        iteration += 1
-        write_iteration(iteration, root)
-        iterations_run += 1
-
-        if on_iteration_start:
-            on_iteration_start(iteration, max_iter, done_count, agent.name)
-
-        result = run_iteration(iteration, max_iter, test_cmd, agent, root, timeout)
-
-        # Check if agent is exhausted
-        if result.agent_result and agent.is_exhausted(result.agent_result):
-            agent_pool.remove(agent)
-            # If this was our last agent, exit
+    try:
+        while iteration < max_iter:
+            # Check if we have any agents left
             if agent_pool.is_empty():
                 return LoopResult(4, "All agents exhausted", iterations_run)
 
-        action, exit_code, done_count = handle_status(
-            result.status,
-            result.files_changed,
-            done_count,
-            root,
-        )
+            # Select an agent for this iteration
+            agent = agent_pool.select_random()
 
-        if on_iteration_end:
-            on_iteration_end(iteration, result, done_count, agent.name)
+            iteration += 1
+            write_iteration(iteration, root)
+            iterations_run += 1
 
-        if action == "exit":
-            if exit_code == 0:
-                return LoopResult(0, "Goal achieved!", iterations_run)
-            elif exit_code == 2:
-                return LoopResult(2, "Ralph needs help. Check .ralph/handoff.md", iterations_run)
-            else:
-                return LoopResult(exit_code or 1, "Unknown error", iterations_run)
+            write_run_state(
+                RunState(
+                    pid=os.getpid(),
+                    started_at=started_at,
+                    iteration=iteration,
+                    max_iterations=max_iter,
+                    agent=agent.name,
+                    agent_started_at=now_iso(),
+                ),
+                root,
+            )
 
-    return LoopResult(3, f"Max iterations reached ({max_iter})", iterations_run)
+            if on_iteration_start:
+                on_iteration_start(iteration, max_iter, done_count, agent.name)
+
+            output_file = get_current_log_path(root)
+            result = run_iteration(
+                iteration,
+                max_iter,
+                test_cmd,
+                agent,
+                root,
+                timeout,
+                output_file=output_file,
+            )
+
+            # Check if agent is exhausted
+            if result.agent_result and agent.is_exhausted(result.agent_result):
+                agent_pool.remove(agent)
+                # If this was our last agent, exit
+                if agent_pool.is_empty():
+                    return LoopResult(4, "All agents exhausted", iterations_run)
+
+            action, exit_code, done_count = handle_status(
+                result.status,
+                result.files_changed,
+                done_count,
+                root,
+            )
+
+            if on_iteration_end:
+                on_iteration_end(iteration, result, done_count, agent.name)
+
+            if action == "exit":
+                if exit_code == 0:
+                    return LoopResult(0, "Goal achieved!", iterations_run)
+                elif exit_code == 2:
+                    return LoopResult(
+                        2,
+                        "Ralph needs help. Check .ralph/handoff.md",
+                        iterations_run,
+                    )
+                else:
+                    return LoopResult(exit_code or 1, "Unknown error", iterations_run)
+
+        return LoopResult(3, f"Max iterations reached ({max_iter})", iterations_run)
+    finally:
+        delete_run_state(root)

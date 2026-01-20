@@ -141,6 +141,32 @@ class TestClaudeAgent:
         assert "Hello from Claude" in result.output
         assert result.error is None or result.error == ""
 
+    @pytest.mark.skipif(IS_WINDOWS, reason="Bash scripts don't work on Windows")
+    def test_invoke_streams_output_to_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test invoke streams stdout and stderr to a file."""
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        mock_claude = bin_dir / "claude"
+        mock_claude.write_text("#!/bin/bash\necho 'stdout line'\necho 'stderr line' 1>&2")
+        mock_claude.chmod(mock_claude.stat().st_mode | stat.S_IEXEC)
+
+        original_path = os.environ.get("PATH", "")
+        monkeypatch.setenv("PATH", f"{bin_dir}:{original_path}")
+
+        output_file = tmp_path / "current.log"
+        agent = ClaudeAgent()
+        result = agent.invoke("test prompt", output_file=output_file)
+
+        log_content = output_file.read_text()
+        assert "stdout line" in log_content
+        assert "stderr line" in log_content
+        assert "stdout line" in result.output
+        assert "stderr line" not in result.output
+        assert result.error is not None
+        assert "stderr line" in result.error
+
     def test_is_exhausted_false_when_error_no_match(self) -> None:
         """Test is_exhausted returns False for non-matching errors."""
         agent = ClaudeAgent()
@@ -272,6 +298,32 @@ class TestCodexAgent:
         assert result.exit_code == 0
         assert "Hello from Codex" in result.output
         assert result.error is None or result.error == ""
+
+    @pytest.mark.skipif(IS_WINDOWS, reason="Bash scripts don't work on Windows")
+    def test_invoke_streams_output_to_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test invoke streams stdout and stderr to a file."""
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        mock_codex = bin_dir / "codex"
+        mock_codex.write_text("#!/bin/bash\necho 'codex out'\necho 'codex err' 1>&2")
+        mock_codex.chmod(mock_codex.stat().st_mode | stat.S_IEXEC)
+
+        original_path = os.environ.get("PATH", "")
+        monkeypatch.setenv("PATH", f"{bin_dir}:{original_path}")
+
+        output_file = tmp_path / "current.log"
+        agent = CodexAgent()
+        result = agent.invoke("test prompt", output_file=output_file)
+
+        log_content = output_file.read_text()
+        assert "codex out" in log_content
+        assert "codex err" in log_content
+        assert "codex out" in result.output
+        assert "codex err" not in result.output
+        assert result.error is not None
+        assert "codex err" in result.error
 
     @pytest.mark.skipif(IS_WINDOWS, reason="Bash scripts don't work on Windows")
     def test_invoke_includes_required_flags(

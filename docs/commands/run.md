@@ -133,6 +133,7 @@ ralph run
 
 ## Related
 
+- [ralph inspect](./inspect.md) - Inspect a running session and tail output
 - [ralph status](./status.md) - Check state without running
 - [ralph reset](./reset.md) - Start fresh
 - [Agents](../concepts/agents.md) - How Ralph works with multiple agents

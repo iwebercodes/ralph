@@ -12,6 +12,7 @@ import typer
 from ralph.core.agent import Agent, ClaudeAgent, CodexAgent
 from ralph.core.loop import IterationResult, run_loop
 from ralph.core.pool import AgentPool
+from ralph.core.run_state import delete_run_state, is_pid_alive, read_run_state
 from ralph.core.state import is_initialized, read_prompt_md, read_state
 from ralph.output.console import Console
 
@@ -64,6 +65,17 @@ Example PROMPT.md:
   - [ ] Users can log in and receive JWT token"""
         console.error("PROMPT.md not found or empty", hint)
         raise typer.Exit(1)
+
+    existing_run = read_run_state(root)
+    if existing_run:
+        alive = is_pid_alive(existing_run.pid)
+        if alive:
+            console.error(
+                f"Ralph is already running (PID {existing_run.pid})",
+                "Use: ralph inspect",
+            )
+            raise typer.Exit(1)
+        delete_run_state(root)
 
     # Build agent pool from available agents
     all_agents: list[Agent] = [ClaudeAgent(), CodexAgent()]

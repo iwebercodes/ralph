@@ -72,6 +72,7 @@ Ralph uses more tokens than running Claude directly. Each rotation is a fresh AP
 |---------|-------------|
 | `ralph init` | Initialize Ralph in the current directory |
 | `ralph run` | Supervise Claude until the goal is complete |
+| `ralph inspect` | Inspect a running Ralph session |
 | `ralph status` | Show current progress |
 | `ralph reset` | Start fresh |
 | `ralph history` | View logs from previous sessions |

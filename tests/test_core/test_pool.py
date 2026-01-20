@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from ralph.core.agent import AgentResult
@@ -24,7 +26,12 @@ class MockAgent:
     def is_available(self) -> bool:
         return True
 
-    def invoke(self, prompt: str, timeout: int = 1800) -> AgentResult:
+    def invoke(
+        self,
+        prompt: str,
+        timeout: int = 1800,
+        output_file: Path | None = None,
+    ) -> AgentResult:
         idx = self.invoke_count
         self.invoke_count += 1
         if idx < len(self.responses):

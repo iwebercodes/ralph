@@ -1,6 +1,6 @@
 # Commands
 
-Ralph has five commands and a global `--about` flag. Here's when to use each one.
+Ralph has six commands and a global `--about` flag. Here's when to use each one.
 
 ## Global Flags
 
@@ -15,6 +15,7 @@ Ralph has five commands and a global `--about` flag. Here's when to use each one
 |---------|-------------|
 | [`ralph init`](./init.md) | Initialize Ralph in the current directory |
 | [`ralph run`](./run.md) | Execute the loop until the goal is complete |
+| [`ralph inspect`](./inspect.md) | Inspect a running Ralph session |
 | [`ralph status`](./status.md) | Show current state without running |
 | [`ralph reset`](./reset.md) | Clear state and start fresh |
 | [`ralph history`](./history.md) | View logs from previous rotations |
@@ -30,10 +31,13 @@ ralph init
 # 3. Run until complete
 ralph run
 
-# 4. Check progress (if interrupted)
+# 4. Inspect live progress (in another terminal)
+ralph inspect
+
+# 5. Check progress (if interrupted)
 ralph status
 
-# 5. Start over (for a new task)
+# 6. Start over (for a new task)
 ralph reset
 ```
 
@@ -49,6 +53,11 @@ ralph run
 ralph run --max 30          # Increase max iterations
 ralph run --test-cmd "npm test"  # Run tests after each iteration
 ralph run --no-color        # Disable colored output
+
+# Inspect
+ralph inspect
+ralph inspect --json        # Output as JSON
+ralph inspect --follow      # Tail live output log
 
 # Check status
 ralph status

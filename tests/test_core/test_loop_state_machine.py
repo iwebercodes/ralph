@@ -49,7 +49,12 @@ class MockAgent:
     def is_available(self) -> bool:
         return True
 
-    def invoke(self, prompt: str, timeout: int = 1800) -> AgentResult:
+    def invoke(
+        self,
+        prompt: str,
+        timeout: int = 1800,
+        output_file: Path | None = None,
+    ) -> AgentResult:
         idx = self.invoke_count
         self.invoke_count += 1
 
@@ -220,7 +225,12 @@ class TestStaleStatusBug:
             def is_available(self) -> bool:
                 return True
 
-            def invoke(self, prompt: str, timeout: int = 1800) -> AgentResult:
+            def invoke(
+                self,
+                prompt: str,
+                timeout: int = 1800,
+                output_file: Path | None = None,
+            ) -> AgentResult:
                 nonlocal status_before_agent
                 status_before_agent = read_status(root)
                 return AgentResult("Mock output", 0, None)

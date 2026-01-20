@@ -168,7 +168,12 @@ class ExhaustingAgent:
     def is_available(self) -> bool:
         return True
 
-    def invoke(self, prompt: str, timeout: int = 1800) -> AgentResult:
+    def invoke(
+        self,
+        prompt: str,
+        timeout: int = 1800,
+        output_file: Path | None = None,
+    ) -> AgentResult:
         self.invoke_count += 1
         if self._root:
             write_status(Status.CONTINUE, self._root)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import patch
@@ -13,6 +14,7 @@ if TYPE_CHECKING:
 
 from ralph.cli import app
 from ralph.core.agent import AgentResult
+from ralph.core.run_state import RunState, write_run_state
 from ralph.core.state import Status, read_iteration, write_iteration, write_status
 
 runner = CliRunner()
@@ -33,7 +35,12 @@ class MockAgentForCLI:
     def is_available(self) -> bool:
         return True
 
-    def invoke(self, prompt: str, timeout: int = 1800) -> AgentResult:
+    def invoke(
+        self,
+        prompt: str,
+        timeout: int = 1800,
+        output_file: Path | None = None,
+    ) -> AgentResult:
         idx = self.call_count
         self.call_count += 1
 
@@ -95,6 +102,25 @@ def test_run_no_claude(project_with_prompt: Path, monkeypatch: pytest.MonkeyPatc
 
     assert result.exit_code == 1
     assert "no ai agents" in result.output.lower()
+
+
+def test_run_fails_when_already_running(project_with_prompt: Path) -> None:
+    """Test run exits when another run is active."""
+    state = RunState(
+        pid=os.getpid(),
+        started_at="2025-01-19T14:30:00+00:00",
+        iteration=1,
+        max_iterations=20,
+        agent="Codex",
+        agent_started_at="2025-01-19T14:30:10+00:00",
+    )
+    write_run_state(state, project_with_prompt)
+
+    result = runner.invoke(app, ["run"])
+
+    assert result.exit_code == 1
+    assert "already running" in result.output.lower()
+    assert "inspect" in result.output.lower()
 
 
 def test_run_single_iteration(

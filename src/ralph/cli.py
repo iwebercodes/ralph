@@ -6,6 +6,7 @@ import typer
 
 from ralph.commands.history import history
 from ralph.commands.init import init
+from ralph.commands.inspect import inspect
 from ralph.commands.reset import reset
 from ralph.commands.run import run
 from ralph.commands.status import status
@@ -38,6 +39,7 @@ app = typer.Typer(
 )
 
 app.command()(init)
+app.command()(inspect)
 app.command()(run)
 app.command()(status)
 app.command()(reset)
