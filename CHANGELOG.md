@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.3.0 - Session Monitoring
+
+Monitor running Ralph sessions from another terminal with `ralph inspect`.
+
+### Added
+
+- **`ralph inspect` command**: When Ralph runs for extended periods, there's no visibility into progress—you can't tell if it's making headway, stuck, or about to finish. Now you can monitor from another terminal:
+  - See current status: iteration number, active agent, start time, last update
+  - `--follow` flag: tail agent output in real-time (like `tail -f`)
+  - `--json` flag: machine-readable output for scripts and integrations
+
+- **Run state tracking**: Ralph now writes `.ralph/run.json` with PID, iteration, agent, and timestamps. The current agent's output streams to `.ralph/current.log`.
+
+- **Concurrent run prevention**: `ralph run` now fails fast if already running in the same directory, preventing accidental parallel sessions that could corrupt state.
+
+- **Configurable timeouts**: Agents like Codex can run for hours on complex tasks. The previous 30-minute default was too aggressive.
+  - `--timeout` flag: customize per-rotation timeout (default: 3 hours)
+  - `--no-timeout` flag: disable timeout entirely for very long tasks
+
+### Fixed
+
+- **Codex failing silently in non-git directories**: Codex would exit with empty output without required directory trust flags, causing Ralph to loop indefinitely. Now works correctly in any project directory.
+
+- **Agent errors hidden from history**: stderr output from agents wasn't captured in history logs, making failures hard to diagnose. Agent errors now appear in log files.
+
 ## v0.2.0 - Multi-Agent Support
 
 Ralph can now work with multiple AI agents and rotate between them when one hits rate limits.
