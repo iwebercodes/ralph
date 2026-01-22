@@ -21,12 +21,12 @@ All agents hit rate limits. [See solutions](./agent-errors.md#all-agents-exhaust
 
 ## General Debugging Tips
 
-### Check the handoff
+### Check the handoff for the current spec
 
 The handoff shows what the agent thinks is happening:
 
 ```bash
-cat .ralph/handoff.md
+ls .ralph/handoffs
 ```
 
 Look for:

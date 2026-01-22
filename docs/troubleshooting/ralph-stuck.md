@@ -14,12 +14,12 @@ This isn't a failure - it's the agent being honest about needing help.
 
 ## What to Do
 
-### 1. Read the handoff
+### 1. Read the handoff for the current spec
 
 The agent explains what's blocking:
 
 ```bash
-cat .ralph/handoff.md
+ls .ralph/handoffs
 ```
 
 Look in the "In Progress" or "Notes" section for the problem description.

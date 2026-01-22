@@ -9,7 +9,9 @@ import typer
 
 from ralph.core.state import (
     GUARDRAILS_TEMPLATE,
+    HANDOFF_DIR,
     HANDOFF_TEMPLATE,
+    MultiSpecState,
     Status,
     get_history_dir,
     get_ralph_dir,
@@ -18,6 +20,7 @@ from ralph.core.state import (
     write_guardrails,
     write_handoff,
     write_iteration,
+    write_multi_state,
     write_status,
 )
 from ralph.output.console import Console
@@ -42,6 +45,16 @@ def reset(
     write_done_count(0, root)
     write_status(Status.IDLE, root)
     write_handoff(HANDOFF_TEMPLATE, root)
+    write_multi_state(
+        MultiSpecState(
+            version=1,
+            iteration=0,
+            status=Status.IDLE,
+            current_index=0,
+            specs=[],
+        ),
+        root,
+    )
 
     # Remove snapshot files
     for snapshot_file in ralph_dir.glob("snapshot_*"):
@@ -62,6 +75,12 @@ def reset(
     elif history_dir.exists():
         shutil.rmtree(history_dir)
         history_dir.mkdir()
+
+    # Clear per-spec handoffs
+    handoffs_dir = get_ralph_dir(root) / HANDOFF_DIR
+    if handoffs_dir.exists():
+        shutil.rmtree(handoffs_dir)
+    handoffs_dir.mkdir(parents=True, exist_ok=True)
 
     typer.echo("Reset complete.")
     typer.echo("  Iteration: 0")

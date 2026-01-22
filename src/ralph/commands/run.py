@@ -13,7 +13,8 @@ from ralph.core.agent import Agent, ClaudeAgent, CodexAgent
 from ralph.core.loop import IterationResult, run_loop
 from ralph.core.pool import AgentPool
 from ralph.core.run_state import delete_run_state, is_pid_alive, read_run_state
-from ralph.core.state import is_initialized, read_prompt_md, read_state
+from ralph.core.specs import discover_specs, read_spec_content
+from ralph.core.state import is_initialized, read_state
 from ralph.output.console import Console
 
 
@@ -51,20 +52,27 @@ def run(
         console.error("Ralph not initialized", "Run: ralph init")
         raise typer.Exit(1)
 
-    prompt = read_prompt_md(root)
-    if not prompt:
-        hint = """Ralph needs a PROMPT.md file in the current directory.
-Create one with your goal, then run: ralph run
+    specs = discover_specs(root)
+    if not specs:
+        hint = """Ralph needs a spec file to run.
 
-Example PROMPT.md:
-  # Goal
-  Implement user authentication with JWT tokens.
+Supported locations:
+  - PROMPT.md in the project root
+  - .ralph/specs/**/*.spec.md
+  - specs/**/*.spec.md
 
-  # Success Criteria
-  - [ ] Users can register with email/password
-  - [ ] Users can log in and receive JWT token"""
-        console.error("PROMPT.md not found or empty", hint)
+See docs: docs/writing-prompts.md"""
+        console.error("No spec files found", hint)
         raise typer.Exit(1)
+
+    for spec in specs:
+        content = read_spec_content(spec.path)
+        if not content:
+            console.error(
+                f"Spec file is empty: {spec.rel_posix}",
+                "Add a goal and success criteria, then run: ralph run",
+            )
+            raise typer.Exit(1)
 
     existing_run = read_run_state(root)
     if existing_run:
@@ -150,12 +158,18 @@ After installing, verify with: claude --version or codex --version"""
     # Show banner at start
     console.banner()
 
-    def on_iteration_start(iteration: int, max_iter: int, done_count: int, agent_name: str) -> None:
+    def on_iteration_start(
+        iteration: int, max_iter: int, done_count: int, agent_name: str, spec_path: str
+    ) -> None:
         console.working(done_count, agent_name)
-        console.iteration_info(iteration, max_iter, done_count)
+        console.iteration_info(iteration, max_iter, done_count, spec_path)
 
     def on_iteration_end(
-        iteration: int, result: IterationResult, done_count: int, agent_name: str
+        iteration: int,
+        result: IterationResult,
+        done_count: int,
+        agent_name: str,
+        spec_path: str,
     ) -> None:
         console.rotation_complete(
             result.status,

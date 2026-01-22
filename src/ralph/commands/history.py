@@ -7,7 +7,8 @@ from pathlib import Path
 
 import typer
 
-from ralph.core.state import get_history_dir, get_history_file, is_initialized
+from ralph.core.specs import discover_specs
+from ralph.core.state import ensure_state, get_history_dir, is_initialized
 from ralph.output.console import Console
 
 
@@ -52,11 +53,17 @@ def history(
         raise typer.Exit(1)
 
     history_dir = get_history_dir(root)
-    if not history_dir.exists():
-        console.error("No history available", "Run ralph run first to create history")
-        raise typer.Exit(1)
-
     log_files = sorted(history_dir.glob("*.log"))
+
+    if not log_files:
+        specs = discover_specs(root)
+        if specs:
+            state = ensure_state([spec.rel_posix for spec in specs], root)
+            if state.specs and 0 <= state.current_index < len(state.specs):
+                current_path = state.specs[state.current_index].path
+                history_dir = get_history_dir(root, current_path)
+                log_files = sorted(history_dir.glob("*.log"))
+
     if not log_files:
         console.error("No history available", "Run ralph run first to create history")
         raise typer.Exit(1)
@@ -90,7 +97,7 @@ def history(
 
     # Determine which rotation to show
     if rotation is not None:
-        log_file = get_history_file(rotation, root)
+        log_file = history_dir / f"{rotation:03d}.log"
         if not log_file.exists():
             console.error(
                 f"Rotation {rotation} not found", "Use ralph history --list to see available"

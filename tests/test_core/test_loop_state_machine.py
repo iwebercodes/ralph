@@ -20,10 +20,33 @@ from ralph.core.loop import run_iteration, run_loop
 from ralph.core.pool import AgentPool
 from ralph.core.state import (
     Status,
+    read_done_count,
+    read_prompt_md,
     read_status,
     write_done_count,
     write_status,
 )
+
+
+def _run_iteration_with_prompt(
+    root: Path,
+    agent: Any,
+    iteration: int = 1,
+    max_iter: int = 20,
+    test_cmd: str | None = None,
+) -> Any:
+    spec_goal = read_prompt_md(root) or ""
+    done_count = read_done_count(root)
+    return run_iteration(
+        iteration=iteration,
+        max_iter=max_iter,
+        test_cmd=test_cmd,
+        agent=agent,
+        spec_path="PROMPT.md",
+        spec_goal=spec_goal,
+        done_count=done_count,
+        root=root,
+    )
 
 
 class MockAgent:
@@ -54,6 +77,7 @@ class MockAgent:
         prompt: str,
         timeout: int = 1800,
         output_file: Path | None = None,
+        crash_patterns: list[str] | None = None,
     ) -> AgentResult:
         idx = self.invoke_count
         self.invoke_count += 1
@@ -96,13 +120,7 @@ class TestStaleStatusBug:
         # Create a mock agent that does NOT write to the status file
         agent = MockAgent(statuses=[None], root=root)
 
-        result = run_iteration(
-            iteration=1,
-            max_iter=20,
-            test_cmd=None,
-            agent=agent,
-            root=root,
-        )
+        result = _run_iteration_with_prompt(root=root, agent=agent)
 
         # The status file should have been reset to IDLE before invoking agent
         assert result.status == Status.IDLE, (
@@ -122,13 +140,7 @@ class TestStaleStatusBug:
         # Create a mock agent that does NOT write to the status file
         agent = MockAgent(statuses=[None], root=root)
 
-        run_iteration(
-            iteration=1,
-            max_iter=20,
-            test_cmd=None,
-            agent=agent,
-            root=root,
-        )
+        _run_iteration_with_prompt(root=root, agent=agent)
 
         # Read what's actually in the status file after the iteration
         actual_status = read_status(root)
@@ -158,13 +170,7 @@ class TestStaleStatusBug:
         # Create a mock agent that does NOT write to the status file
         agent = MockAgent(statuses=[None], root=root)
 
-        result = run_iteration(
-            iteration=1,
-            max_iter=20,
-            test_cmd=None,
-            agent=agent,
-            root=root,
-        )
+        result = _run_iteration_with_prompt(root=root, agent=agent)
 
         # Check what status Ralph saw
         assert result.status == Status.IDLE, (
@@ -190,10 +196,10 @@ class TestStaleStatusBug:
         )
 
         # Run first iteration
-        result1 = run_iteration(iteration=1, max_iter=20, test_cmd=None, agent=agent, root=root)
+        result1 = _run_iteration_with_prompt(root=root, agent=agent, iteration=1)
 
         # Run second iteration (agent doesn't write status)
-        result2 = run_iteration(iteration=2, max_iter=20, test_cmd=None, agent=agent, root=root)
+        result2 = _run_iteration_with_prompt(root=root, agent=agent, iteration=2)
 
         # Iteration 1 should see ROTATE (agent wrote it)
         assert result1.status == Status.ROTATE, "Iteration 1 should see ROTATE"
@@ -230,6 +236,7 @@ class TestStaleStatusBug:
                 prompt: str,
                 timeout: int = 1800,
                 output_file: Path | None = None,
+                crash_patterns: list[str] | None = None,
             ) -> AgentResult:
                 nonlocal status_before_agent
                 status_before_agent = read_status(root)
@@ -239,7 +246,7 @@ class TestStaleStatusBug:
                 return False
 
         agent = StatusCheckingAgent()
-        run_iteration(iteration=1, max_iter=20, test_cmd=None, agent=agent, root=root)
+        _run_iteration_with_prompt(root=root, agent=agent)
 
         # The status file should NOT contain STUCK when agent runs
         # (It should have been reset to IDLE)
@@ -269,7 +276,7 @@ class TestStaleStatusBug:
 
         iteration_statuses: list[Status] = []
         for i in range(1, 5):
-            result = run_iteration(iteration=i, max_iter=20, test_cmd=None, agent=agent, root=root)
+            result = _run_iteration_with_prompt(root=root, agent=agent, iteration=i)
             iteration_statuses.append(result.status)
 
         # Iteration 1: Agent wrote CONTINUE, should see CONTINUE
@@ -346,7 +353,9 @@ class TestStaleStatusInFullLoop:
 
         observed_statuses: list[Status] = []
 
-        def on_iteration_end(iteration: int, result: Any, done_count: int, agent_name: str) -> None:
+        def on_iteration_end(
+            iteration: int, result: Any, done_count: int, agent_name: str, spec_path: str
+        ) -> None:
             observed_statuses.append(result.status)
 
         run_loop(
@@ -388,7 +397,7 @@ class TestExpectedBehaviorDocumentation:
             root=root,
         )
 
-        result = run_iteration(iteration=1, max_iter=20, test_cmd=None, agent=agent, root=root)
+        result = _run_iteration_with_prompt(root=root, agent=agent)
 
         # The system should see IDLE when agent didn't signal anything
         assert result.status == Status.IDLE, (

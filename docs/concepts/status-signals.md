@@ -80,7 +80,7 @@ The agent signals STUCK when it genuinely needs human help. Something is blockin
   ╰───────────────────────────────────────────────────────╯
 ```
 
-Ralph stops and returns exit code 2. Check handoff.md for what the agent needs.
+Ralph stops and returns exit code 2. Check the relevant spec handoff for what the agent needs.
 
 See [Troubleshooting STUCK](../troubleshooting/ralph-stuck.md) for solutions.
 

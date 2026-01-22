@@ -28,6 +28,18 @@ Rules or limitations to follow.
 
 Each section serves a purpose.
 
+## Spec Files and Locations
+
+Ralph can run against multiple spec files at once. Each spec file uses the same format
+as PROMPT.md and lives in one of these locations:
+
+- `PROMPT.md` in the project root
+- `.ralph/specs/**/*.spec.md` for private (uncommitted) specs
+- `specs/**/*.spec.md` for shared specs you commit
+
+When multiple specs are present, Ralph rotates through them in order and only completes
+when all specs reach 3/3 verification without new file changes.
+
 ## Writing the Goal
 
 Your goal should be clear and specific. One task, not multiple.

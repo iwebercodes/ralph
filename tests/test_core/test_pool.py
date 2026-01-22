@@ -31,6 +31,7 @@ class MockAgent:
         prompt: str,
         timeout: int = 1800,
         output_file: Path | None = None,
+        crash_patterns: list[str] | None = None,
     ) -> AgentResult:
         idx = self.invoke_count
         self.invoke_count += 1

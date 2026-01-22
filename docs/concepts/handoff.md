@@ -1,10 +1,11 @@
 # Handoff
 
-The handoff.md file is Ralph's memory between rotations. It carries progress, notes, and next steps from one agent session to the next.
+Handoff files are Ralph's memory between rotations. Each spec gets its own handoff so
+progress stays scoped to the active constraint.
 
 ## What is Handoff?
 
-Each rotation starts fresh - the agent has no memory of previous rotations. Handoff.md bridges this gap by providing:
+Each rotation starts fresh - the agent has no memory of previous rotations. The handoff bridges this gap by providing:
 
 - What's been completed
 - What's in progress
@@ -41,19 +42,19 @@ Working on login endpoint.
 
 ## How It Works
 
-1. **Rotation starts:** The agent reads handoff.md to understand current state
+1. **Rotation starts:** The agent reads the current spec's handoff to understand state
 2. **During work:** The agent makes progress on the task
-3. **Before signaling:** The agent updates handoff.md with new progress
+3. **Before signaling:** The agent updates the handoff with new progress
 4. **Next rotation:** A new agent session reads the updated handoff
 
 The handoff is the only way information persists between rotations (along with guardrails and actual file changes).
 
 ## Viewing the Handoff
 
-The file is at `.ralph/handoff.md`:
+Handoffs live in `.ralph/handoffs/` with `{name}-{hash}.md` filenames:
 
 ```bash
-cat .ralph/handoff.md
+ls .ralph/handoffs
 ```
 
 You can read it anytime to see what the agent thinks the current state is.
@@ -62,14 +63,14 @@ You can read it anytime to see what the agent thinks the current state is.
 
 Sometimes the handoff becomes confusing or inaccurate. Options:
 
-**Edit it manually:** Fix specific issues in `.ralph/handoff.md`
+**Edit it manually:** Fix specific issues in the relevant file under `.ralph/handoffs/`
 
 **Reset and start over:**
 ```bash
 ralph reset
 ```
 
-This clears the handoff to the default template.
+This clears handoffs to the default template.
 
 ## Related
 

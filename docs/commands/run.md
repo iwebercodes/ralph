@@ -11,9 +11,10 @@ ralph run [--max N] [--test-cmd CMD] [--agents NAMES] [--no-color]
 ## What It Does
 
 1. Discovers available AI agents (Claude, Codex, etc.)
-2. Builds a prompt from PROMPT.md and current state
+2. Discovers specs from PROMPT.md, `.ralph/specs/**/*.spec.md`, and `specs/**/*.spec.md`
+3. Builds a prompt from the current spec and state
 3. Runs an agent with that prompt
-4. Saves progress to handoff.md
+4. Saves progress to the spec's handoff file
 5. Repeats until the agent signals DONE (verified 3 times) or max iterations
 
 If an agent becomes rate limited, Ralph automatically rotates to another available agent.
@@ -70,6 +71,7 @@ This is useful for testing with a specific agent or when you want to avoid using
 ╰─────────────────────────────────────────────────────────╯
 
   ╭── Claude working... ──────────────────────────────────╮
+  │  Spec:         PROMPT.md                              │
   │  Iteration:    1/20                                   │
   ├── Rotation complete ──────────────────────────────────┤
   │  Result:       CONTINUE                               │
@@ -96,6 +98,7 @@ This is useful for testing with a specific agent or when you want to avoid using
 ```
 
 - **Agent name** - Shows which agent is working (Claude, Codex, etc.)
+- **Spec** - Current spec file for this rotation
 - **Iteration** - Rotation number / max iterations
 - **[REVIEW]** - Indicates a verification rotation
 - **Result** - What the agent signaled ([see signals](../concepts/status-signals.md))

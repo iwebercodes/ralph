@@ -10,6 +10,8 @@ where the last left off.
 
 ## YOUR GOAL
 
+Spec file: {spec_path}
+
 {goal}
 
 ## CURRENT STATE (from previous rotation)
@@ -21,7 +23,7 @@ where the last left off.
 1. **Orient**: Read the handoff state. Understand where we are.
 2. **Execute**: Work toward the goal. Make real progress.
 3. **Test**: Run tests frequently to verify progress.
-4. **Update State**: Keep .ralph/handoff.md current with your progress.
+4. **Update State**: Keep the handoff for this spec updated ({handoff_path}).
 5. **Learn**: Before finishing, review what you learned this rotation.
 
 ## GUARDRAILS
@@ -54,9 +56,10 @@ Write ONE of these to .ralph/status:
 ## RULES
 
 - NEVER ignore guardrails - they exist because previous rotations learned hard lessons
-- ALWAYS update handoff.md before signaling ROTATE or DONE
+- ALWAYS update the handoff for this spec before signaling ROTATE or DONE
 - Signal ROTATE proactively when you feel context getting cluttered
-- Only signal DONE when ALL success criteria in PROMPT.md are met
+- Only signal DONE when ALL success criteria in the current spec file are met
+- NEVER modify spec files (PROMPT.md, *.spec.md) unless the spec explicitly asks you to
 """
 
 PROMPT_TEMPLATE_REVIEW = """# RALPH LOOP - ROTATION {iteration}/{max_iter} [REVIEW]
@@ -66,6 +69,8 @@ rotation. A previous rotation signaled DONE. Your job is to **independently veri
 the work is actually complete.
 
 ## YOUR GOAL
+
+Spec file: {spec_path}
 
 {goal}
 
@@ -82,8 +87,10 @@ the work is actually complete.
    - Test edge cases the previous rotation might have skipped
    - Write temporary test scripts if needed to verify behavior
 3. **Check Every Criterion**: Go through PROMPT.md success criteria one by one.
-4. **If Anything Is Wrong**: Fix it, update handoff.md, and signal CONTINUE (not DONE).
-5. **If Everything Passes**: Update handoff.md confirming your verification, signal DONE.
+4. **If Anything Is Wrong**: Fix it, update the handoff for this spec,
+   and signal CONTINUE (not DONE).
+5. **If Everything Passes**: Update the handoff for this spec confirming your verification,
+   signal DONE.
 
 ## GUARDRAILS
 
@@ -120,6 +127,7 @@ Write ONE of these to .ralph/status:
 - Verification must be independent and thorough
 - Finding problems is good - that's what review is for
 - Only signal DONE if you would stake your reputation on it
+- NEVER modify spec files (PROMPT.md, *.spec.md) unless the spec explicitly asks you to
 """
 
 
@@ -135,6 +143,8 @@ def assemble_prompt(
     goal: str,
     handoff: str,
     guardrails: str,
+    spec_path: str,
+    handoff_path: str,
 ) -> str:
     """Assemble the full prompt for Claude."""
     if done_count > 0:
@@ -145,6 +155,8 @@ def assemble_prompt(
             handoff=handoff,
             guardrails=guardrails,
             done_count_plus_one=done_count + 1,
+            spec_path=spec_path,
+            handoff_path=handoff_path,
         )
     else:
         return PROMPT_TEMPLATE_IMPLEMENT.format(
@@ -153,4 +165,6 @@ def assemble_prompt(
             goal=goal,
             handoff=handoff,
             guardrails=guardrails,
+            spec_path=spec_path,
+            handoff_path=handoff_path,
         )

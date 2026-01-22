@@ -7,7 +7,7 @@ Rotations keep happening but the task never completes.
 - Many rotations but never hits DONE
 - Keeps saying CONTINUE
 - Verification resets (files keep changing on DONE)
-- Progress in handoff doesn't match expectations
+- Progress in the spec handoff doesn't match expectations
 
 ## Diagnose the Problem
 
@@ -29,7 +29,7 @@ Look at several rotations - is the agent doing the same thing over and over?
 ### Check progress
 
 ```bash
-cat .ralph/handoff.md
+ls .ralph/handoffs
 ```
 
 - Is the "Completed" section growing?
@@ -131,9 +131,9 @@ ralph run
 
 Sometimes you need to help:
 
-1. Read handoff.md to understand state
+1. Read the spec handoff to understand state
 2. Fix something manually
-3. Update handoff.md to reflect what you did
+3. Update the spec handoff to reflect what you did
 4. Run ralph again
 
 ## Related

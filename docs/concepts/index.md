@@ -14,7 +14,7 @@ Each fresh agent session in the loop. Ralph breaks work into rotations to keep c
 The 3x completion check. Ralph doesn't trust the first "done" - it verifies three times with no changes.
 
 **[Handoff](./handoff.md)**
-How state persists between rotations. The handoff.md file carries progress forward.
+How state persists between rotations. Handoffs carry progress forward per spec.
 
 **[Guardrails](./guardrails.md)**
 Lessons agents learn while working. These persist across rotations to prevent repeated mistakes.

@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 from ralph.cli import app
 from ralph.core.agent import AgentResult
 from ralph.core.run_state import RunState, write_run_state
-from ralph.core.state import Status, read_iteration, write_iteration, write_status
+from ralph.core.state import Status, get_history_dir, read_iteration, write_iteration, write_status
 
 runner = CliRunner()
 
@@ -40,6 +40,7 @@ class MockAgentForCLI:
         prompt: str,
         timeout: int = 1800,
         output_file: Path | None = None,
+        crash_patterns: list[str] | None = None,
     ) -> AgentResult:
         idx = self.call_count
         self.call_count += 1
@@ -80,7 +81,7 @@ def test_run_no_prompt(initialized_project: Path) -> None:
     result = runner.invoke(app, ["run"])
 
     assert result.exit_code == 1
-    assert "PROMPT.md" in result.output
+    assert "No spec files" in result.output
 
 
 def test_run_empty_prompt(initialized_project: Path) -> None:
@@ -255,7 +256,7 @@ def test_run_creates_history(
 
     _run_with_mock_agent(project_with_prompt, responses)
 
-    history_dir = project_with_prompt / ".ralph" / "history"
+    history_dir = get_history_dir(project_with_prompt, "PROMPT.md")
     log_files = list(history_dir.glob("*.log"))
     assert len(log_files) == 3
 

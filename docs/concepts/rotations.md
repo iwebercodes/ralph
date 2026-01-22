@@ -20,7 +20,7 @@ AI context windows get "polluted" over long conversations:
 
 Ralph prevents this by starting fresh regularly. Each rotation gets a clean context with:
 - The original goal (PROMPT.md)
-- Current progress (handoff.md)
+- Current progress (spec handoff)
 - Learned lessons (guardrails.md)
 
 No conversation history. No accumulated confusion.
@@ -28,10 +28,10 @@ No conversation history. No accumulated confusion.
 ## What Happens Each Rotation
 
 1. **Ralph picks an agent** from the available pool
-2. **Ralph builds a prompt** from your PROMPT.md plus current state
+2. **Ralph builds a prompt** from the current spec plus current state
 3. **Agent receives the prompt** with fresh context
 4. **Agent works** on the task
-5. **Agent updates handoff.md** with progress and notes
+5. **Agent updates the spec handoff** with progress and notes
 6. **Agent signals status** (CONTINUE, DONE, ROTATE, STUCK)
 7. **Ralph logs the rotation** to history
 8. **Next rotation begins** (if needed)

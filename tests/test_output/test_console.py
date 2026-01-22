@@ -62,6 +62,13 @@ class TestConsole:
         assert "5/20" in output
         assert "───" in output  # Visual separator
 
+    def test_iteration_info_shows_spec_path(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Test iteration info shows spec path even for single PROMPT.md."""
+        console = Console(no_color=True)
+        console.iteration_info(1, 20, 0, spec_path="PROMPT.md")
+        output = capsys.readouterr().out
+        assert "Spec: PROMPT.md" in output
+
     def test_iteration_info_non_tty_review(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Test iteration info in review mode for non-TTY."""
         console = Console(no_color=True)
@@ -118,7 +125,7 @@ class TestConsole:
         console.stuck()
         output = capsys.readouterr().out
         assert "BLOCKED" in output
-        assert "handoff.md" in output
+        assert "handoffs" in output
 
     def test_max_iterations_non_tty(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Test max iterations for non-TTY output."""
@@ -194,6 +201,15 @@ class TestConsoleTTY:
         assert "Iteration:" in output
         assert "5" in output
         # Status line removed - box title shows working/reviewing state
+
+    def test_iteration_info_tty_shows_spec_path(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Test iteration info shows spec path in TTY mode."""
+        console = Console(no_color=True)
+        console._is_tty = True
+        console.iteration_info(1, 20, 0, spec_path="specs/api.spec.md")
+        output = capsys.readouterr().out
+        assert "Spec:" in output
+        assert "specs/api.spec.md" in output
 
     def test_iteration_info_tty_review(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Test iteration info in review mode for TTY."""
@@ -289,7 +305,7 @@ class TestConsoleTTY:
         output = capsys.readouterr().out
         assert "BLOCKED" in output
         assert "Human input needed" in output
-        assert "handoff.md" in output
+        assert "handoffs" in output
         assert "Next steps:" in output
         assert "─" in output
 
@@ -301,7 +317,7 @@ class TestConsoleTTY:
         output = capsys.readouterr().out
         assert "MAX ITERATIONS" in output
         assert "20/20" in output
-        assert "handoff.md" in output
+        assert "handoffs" in output
         assert "ralph run" in output
         assert "ralph reset" in output
         assert "─" in output

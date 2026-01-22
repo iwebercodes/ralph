@@ -9,9 +9,11 @@ import typer
 
 from ralph.core.state import (
     GUARDRAILS_TEMPLATE,
+    HANDOFF_DIR,
     HANDOFF_TEMPLATE,
     HISTORY_DIR,
     PROMPT_TEMPLATE,
+    MultiSpecState,
     Status,
     get_ralph_dir,
     is_initialized,
@@ -19,6 +21,7 @@ from ralph.core.state import (
     write_guardrails,
     write_handoff,
     write_iteration,
+    write_multi_state,
     write_status,
 )
 from ralph.output.console import Console
@@ -41,6 +44,7 @@ def init(
     # Create directory structure
     ralph_dir.mkdir(parents=True)
     (ralph_dir / HISTORY_DIR).mkdir()
+    (ralph_dir / HANDOFF_DIR).mkdir()
 
     # Initialize state files
     write_status(Status.IDLE, root)
@@ -48,6 +52,16 @@ def init(
     write_done_count(0, root)
     write_handoff(HANDOFF_TEMPLATE, root)
     write_guardrails(GUARDRAILS_TEMPLATE, root)
+    write_multi_state(
+        MultiSpecState(
+            version=1,
+            iteration=0,
+            status=Status.IDLE,
+            current_index=0,
+            specs=[],
+        ),
+        root,
+    )
 
     # Create PROMPT.md if it doesn't exist
     prompt_path = root / "PROMPT.md"

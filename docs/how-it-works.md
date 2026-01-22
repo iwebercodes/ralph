@@ -26,7 +26,7 @@ Here's what happens:
        ▼
 ┌─────────────┐
 │  Rotation 1 │  Agent works, makes progress
-│  (fresh)    │  Saves state to handoff.md
+│  (fresh)    │  Saves state to spec handoff
 └──────┬──────┘
        │
        ▼
@@ -63,6 +63,18 @@ This catches:
 - Premature completion claims
 - Forgotten requirements
 - Last-minute changes that were overlooked
+
+## Multi-Spec Mode
+
+Ralph can treat multiple spec files as a single set of constraints. It discovers:
+
+- `PROMPT.md` in the project root
+- `.ralph/specs/**/*.spec.md`
+- `specs/**/*.spec.md`
+
+It rotates through specs round-robin, tracking a 0/3 → 3/3 verification counter per spec.
+If any tracked file changes during a rotation, all counters reset to 0. Ralph only completes
+when **every** spec reaches 3/3 with no file changes.
 
 ## The Tradeoff
 

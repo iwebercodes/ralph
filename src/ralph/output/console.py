@@ -90,14 +90,20 @@ class Console:
             title = f"{agent_name} reviewing..." if done_count > 0 else f"{agent_name} working..."
             self._print(self._box_top(title))
 
-    def iteration_info(self, iteration: int, max_iter: int, done_count: int) -> None:
+    def iteration_info(
+        self, iteration: int, max_iter: int, done_count: int, spec_path: str | None = None
+    ) -> None:
         """Print iteration info inside the box."""
         review_tag = self._colors.magenta(" [REVIEW]") if done_count > 0 else ""
 
         if self._is_tty:
             iter_str = f"{self._colors.cyan(str(iteration))}/{max_iter}{review_tag}"
+            if spec_path:
+                self._print(self._box_line(f"Spec:         {spec_path}"))
             self._print(self._box_line(f"Iteration:    {iter_str}"))
         else:
+            if spec_path:
+                self._print(f"[ralph] Spec: {spec_path}")
             mode = " [REVIEW]" if done_count > 0 else ""
             self._print(f"[ralph] ─── Rotation {iteration}/{max_iter}{mode} ───")
 
@@ -208,12 +214,12 @@ class Console:
             self._print(red(f"  ╰{line}╯"))
             self._print()
             self._print("  Next steps:")
-            self._print("    1. Read .ralph/handoff.md for what's blocking")
+            self._print("    1. Read .ralph/handoffs/ for what's blocking")
             self._print("    2. Fix the issue or provide guidance")
             self._print("    3. Run: ralph run")
             self._print()
         else:
-            self._print("[ralph] BLOCKED - see .ralph/handoff.md for next steps")
+            self._print("[ralph] BLOCKED - see .ralph/handoffs/ for next steps")
 
     def all_agents_exhausted(self) -> None:
         """Print message when all agents are exhausted (rate limited)."""
@@ -252,7 +258,7 @@ class Console:
             self._print(yellow("  │") + msg + " " * msg_padding + yellow("│"))
             self._print(yellow(f"  ╰{line}╯"))
             self._print()
-            self._print("  Check .ralph/handoff.md for current state")
+            self._print("  Check .ralph/handoffs/ for current state")
             self._print("  To continue: ralph run")
             self._print("  To reset:    ralph reset")
             self._print()

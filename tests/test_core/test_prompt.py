@@ -7,6 +7,9 @@ from pathlib import Path
 from ralph.core.prompt import assemble_prompt, get_mode
 from ralph.core.state import read_guardrails, read_handoff, read_prompt_md
 
+SPEC_PATH = "PROMPT.md"
+HANDOFF_PATH = ".ralph/handoffs/000-prompt-000000.md"
+
 
 def test_get_mode_implement() -> None:
     """Test mode is IMPLEMENT when done_count is 0."""
@@ -29,6 +32,8 @@ def test_assemble_prompt_basic() -> None:
         goal="Build a thing",
         handoff="Current state",
         guardrails="Don't break stuff",
+        spec_path=SPEC_PATH,
+        handoff_path=HANDOFF_PATH,
     )
 
     assert "ROTATION 1/20" in prompt
@@ -47,6 +52,8 @@ def test_assemble_prompt_review_mode() -> None:
         goal="Goal",
         handoff="Handoff",
         guardrails="Guardrails",
+        spec_path=SPEC_PATH,
+        handoff_path=HANDOFF_PATH,
     )
 
     assert "ROTATION 5/10" in prompt
@@ -62,6 +69,8 @@ def test_assemble_prompt_contains_instructions() -> None:
         goal="Goal",
         handoff="Handoff",
         guardrails="Guardrails",
+        spec_path=SPEC_PATH,
+        handoff_path=HANDOFF_PATH,
     )
 
     # Check required sections for IMPLEMENT mode
@@ -83,6 +92,8 @@ def test_assemble_prompt_review_contains_verification() -> None:
         goal="Goal",
         handoff="Handoff",
         guardrails="Guardrails",
+        spec_path=SPEC_PATH,
+        handoff_path=HANDOFF_PATH,
     )
 
     # Check required sections for REVIEW mode
@@ -105,6 +116,8 @@ def test_assemble_prompt_contains_signals() -> None:
         goal="Goal",
         handoff="Handoff",
         guardrails="Guardrails",
+        spec_path=SPEC_PATH,
+        handoff_path=HANDOFF_PATH,
     )
 
     assert "CONTINUE" in prompt
@@ -151,6 +164,8 @@ def test_integration_full_prompt_assembly(initialized_project: Path) -> None:
         goal=goal,
         handoff=handoff,
         guardrails=guardrails,
+        spec_path=SPEC_PATH,
+        handoff_path=HANDOFF_PATH,
     )
 
     # Verify ALL THREE file contents appear in the final prompt
@@ -191,6 +206,8 @@ def test_integration_with_windows_line_endings(initialized_project: Path) -> Non
         goal=goal,
         handoff=handoff,
         guardrails=guardrails,
+        spec_path=SPEC_PATH,
+        handoff_path=HANDOFF_PATH,
     )
 
     assert "WINDOWS_GOAL_CONTENT" in prompt
@@ -226,6 +243,8 @@ def test_integration_with_utf8_bom(initialized_project: Path) -> None:
         goal=goal,
         handoff=handoff,
         guardrails=guardrails,
+        spec_path=SPEC_PATH,
+        handoff_path=HANDOFF_PATH,
     )
 
     assert "BOM_GOAL_CONTENT" in prompt
@@ -258,6 +277,8 @@ def test_integration_with_unicode_content(initialized_project: Path) -> None:
         goal=goal,
         handoff=handoff,
         guardrails=guardrails,
+        spec_path=SPEC_PATH,
+        handoff_path=HANDOFF_PATH,
     )
 
     assert "🎯" in prompt
@@ -294,6 +315,8 @@ def test_integration_with_special_formatting_chars(initialized_project: Path) ->
         goal=goal,
         handoff=handoff,
         guardrails=guardrails,
+        spec_path=SPEC_PATH,
+        handoff_path=HANDOFF_PATH,
     )
 
     # All special characters should appear correctly
@@ -334,6 +357,8 @@ def test_integration_with_large_files(initialized_project: Path) -> None:
         goal=goal,
         handoff=handoff,
         guardrails=guardrails,
+        spec_path=SPEC_PATH,
+        handoff_path=HANDOFF_PATH,
     )
 
     # All content should be present
@@ -369,6 +394,8 @@ def test_integration_missing_handoff_uses_default(initialized_project: Path) -> 
         goal=goal,
         handoff=handoff,
         guardrails=guardrails,
+        spec_path=SPEC_PATH,
+        handoff_path=HANDOFF_PATH,
     )
 
     # Default template content should be in prompt
@@ -401,6 +428,8 @@ def test_integration_missing_guardrails_uses_default(initialized_project: Path) 
         goal=goal,
         handoff=handoff,
         guardrails=guardrails,
+        spec_path=SPEC_PATH,
+        handoff_path=HANDOFF_PATH,
     )
 
     assert "# Guardrails" in prompt
@@ -429,6 +458,8 @@ def test_integration_empty_handoff_file(initialized_project: Path) -> None:
         goal=goal,
         handoff=handoff,
         guardrails=guardrails,
+        spec_path=SPEC_PATH,
+        handoff_path=HANDOFF_PATH,
     )
 
     assert "Test" in prompt
@@ -459,6 +490,8 @@ def test_integration_whitespace_only_files(initialized_project: Path) -> None:
         goal=goal,
         handoff=handoff,
         guardrails=guardrails,
+        spec_path=SPEC_PATH,
+        handoff_path=HANDOFF_PATH,
     )
 
     assert "Test" in prompt

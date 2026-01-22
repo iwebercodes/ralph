@@ -91,8 +91,8 @@ premature completion:
   3. When "DONE" is signaled, Ralph verifies 3x with fresh context
   4. Only after 3 consecutive verifications is the goal truly complete
 
-The supervised agent handles internal protocol (handoff.md, guardrails.md,
-status signals). You just write PROMPT.md and run Ralph.
+The supervised agent handles internal protocol (handoff files, guardrails.md,
+status signals). You just write PROMPT.md or specs and run Ralph.
 """
 
 

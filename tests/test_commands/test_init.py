@@ -32,6 +32,8 @@ def test_init_creates_state_files(temp_project: Path) -> None:
     assert (ralph_dir / "handoff.md").exists()
     assert (ralph_dir / "guardrails.md").exists()
     assert (ralph_dir / "history").exists()
+    assert (ralph_dir / "handoffs").exists()
+    assert (ralph_dir / "state.json").exists()
 
 
 def test_init_creates_prompt_md(temp_project: Path) -> None:

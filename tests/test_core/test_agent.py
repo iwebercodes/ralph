@@ -13,6 +13,7 @@ from ralph.core.agent import (
     AgentResult,
     ClaudeAgent,
     CodexAgent,
+    _invoke_with_streaming,
 )
 
 IS_WINDOWS = sys.platform == "win32"
@@ -356,3 +357,160 @@ class TestCodexAgent:
         agent = CodexAgent()
         result = AgentResult(output="Normal text without limit words", exit_code=0, error=None)
         assert agent.is_exhausted(result) is False
+
+
+class TestRealTimeStderrMonitoring:
+    """Tests for real-time stderr monitoring and crash pattern detection."""
+
+    @pytest.mark.skipif(IS_WINDOWS, reason="Bash scripts don't work on Windows")
+    def test_crash_pattern_in_stderr_kills_process(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test that a crash pattern in stderr kills the hung process."""
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        mock_script = bin_dir / "hung_script"
+        # Script writes crash pattern to stderr, then hangs forever
+        mock_script.write_text(
+            "#!/bin/bash\n"
+            "echo 'starting' >&2\n"
+            "echo 'ECONNRESET: connection reset' >&2\n"
+            "sleep 100\n"  # Hang forever
+        )
+        mock_script.chmod(mock_script.stat().st_mode | stat.S_IEXEC)
+
+        output_file = tmp_path / "output.log"
+        result = _invoke_with_streaming(
+            [str(mock_script)],
+            timeout=10,
+            output_file=output_file,
+            crash_patterns=[r"econnreset"],
+        )
+
+        # Process should have been killed (SIGKILL = -9 on Linux)
+        assert result.exit_code < 0  # Killed by signal
+        assert "ECONNRESET" in (result.error or "")
+
+    @pytest.mark.skipif(IS_WINDOWS, reason="Bash scripts don't work on Windows")
+    def test_crash_pattern_etimedout_kills_process(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test that ETIMEDOUT pattern in stderr kills the process."""
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        mock_script = bin_dir / "hung_script"
+        mock_script.write_text("#!/bin/bash\necho 'Connection error: ETIMEDOUT' >&2\nsleep 100\n")
+        mock_script.chmod(mock_script.stat().st_mode | stat.S_IEXEC)
+
+        output_file = tmp_path / "output.log"
+        result = _invoke_with_streaming(
+            [str(mock_script)],
+            timeout=10,
+            output_file=output_file,
+            crash_patterns=[r"etimedout"],
+        )
+
+        assert result.exit_code < 0  # Killed by signal
+        assert "ETIMEDOUT" in (result.error or "")
+
+    @pytest.mark.skipif(IS_WINDOWS, reason="Bash scripts don't work on Windows")
+    def test_no_messages_pattern_kills_process(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test that 'No messages returned' pattern kills the process."""
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        mock_script = bin_dir / "hung_script"
+        mock_script.write_text(
+            "#!/bin/bash\necho 'Error: No messages returned from API' >&2\nsleep 100\n"
+        )
+        mock_script.chmod(mock_script.stat().st_mode | stat.S_IEXEC)
+
+        output_file = tmp_path / "output.log"
+        result = _invoke_with_streaming(
+            [str(mock_script)],
+            timeout=10,
+            output_file=output_file,
+            crash_patterns=[r"no messages returned"],
+        )
+
+        assert result.exit_code < 0  # Killed by signal
+        assert "No messages returned" in (result.error or "")
+
+    @pytest.mark.skipif(IS_WINDOWS, reason="Bash scripts don't work on Windows")
+    def test_no_crash_patterns_does_not_affect_normal_run(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test that without crash patterns, process runs normally."""
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        mock_script = bin_dir / "normal_script"
+        mock_script.write_text("#!/bin/bash\necho 'stdout output'\necho 'stderr output' >&2\n")
+        mock_script.chmod(mock_script.stat().st_mode | stat.S_IEXEC)
+
+        output_file = tmp_path / "output.log"
+        result = _invoke_with_streaming(
+            [str(mock_script)],
+            timeout=10,
+            output_file=output_file,
+            crash_patterns=None,
+        )
+
+        assert result.exit_code == 0
+        assert "stdout output" in result.output
+        assert "stderr output" in (result.error or "")
+
+    @pytest.mark.skipif(IS_WINDOWS, reason="Bash scripts don't work on Windows")
+    def test_non_matching_stderr_does_not_kill_process(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test that non-matching stderr content doesn't trigger crash detection."""
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        mock_script = bin_dir / "warning_script"
+        mock_script.write_text(
+            "#!/bin/bash\necho 'Some warning: connection slow' >&2\necho 'done'\n"
+        )
+        mock_script.chmod(mock_script.stat().st_mode | stat.S_IEXEC)
+
+        output_file = tmp_path / "output.log"
+        result = _invoke_with_streaming(
+            [str(mock_script)],
+            timeout=10,
+            output_file=output_file,
+            crash_patterns=[r"econnreset", r"etimedout"],
+        )
+
+        assert result.exit_code == 0
+        assert "done" in result.output
+
+    @pytest.mark.skipif(IS_WINDOWS, reason="Bash scripts don't work on Windows")
+    def test_crash_pattern_via_agent_invoke(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test that crash patterns work through Agent.invoke."""
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        mock_claude = bin_dir / "claude"
+        mock_claude.write_text(
+            "#!/bin/bash\n"
+            "echo 'starting' >&2\n"
+            "echo 'ECONNRESET: connection reset by peer' >&2\n"
+            "sleep 100\n"
+        )
+        mock_claude.chmod(mock_claude.stat().st_mode | stat.S_IEXEC)
+
+        original_path = os.environ.get("PATH", "")
+        monkeypatch.setenv("PATH", f"{bin_dir}:{original_path}")
+
+        output_file = tmp_path / "output.log"
+        agent = ClaudeAgent()
+        result = agent.invoke(
+            "test",
+            timeout=10,
+            output_file=output_file,
+            crash_patterns=[r"econnreset"],
+        )
+
+        assert result.exit_code < 0  # Killed by signal
+        assert "ECONNRESET" in (result.error or "")

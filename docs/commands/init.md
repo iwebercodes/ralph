@@ -14,11 +14,13 @@ Creates the Ralph directory structure and a PROMPT.md template:
 
 ```
 .ralph/
-├── handoff.md      # State between rotations
+├── handoff.md      # Legacy handoff (single-spec)
+├── handoffs/       # Per-spec handoffs
 ├── guardrails.md   # Learned lessons
 ├── status          # Current status signal
 ├── iteration       # Current iteration number
 ├── done_count      # Verification counter
+├── state.json      # Spec matrix + progress
 └── history/        # Logs from each rotation
 
 PROMPT.md           # Your goal (created if missing)

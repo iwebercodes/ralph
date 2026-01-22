@@ -12,14 +12,17 @@ import pytest
 
 from ralph.core.state import (
     GUARDRAILS_TEMPLATE,
+    HANDOFF_DIR,
     HANDOFF_TEMPLATE,
     HISTORY_DIR,
     RALPH_DIR,
+    MultiSpecState,
     Status,
     write_done_count,
     write_guardrails,
     write_handoff,
     write_iteration,
+    write_multi_state,
     write_status,
 )
 
@@ -43,12 +46,23 @@ def initialized_project(temp_project: Path) -> Path:
     ralph_dir = temp_project / RALPH_DIR
     ralph_dir.mkdir()
     (ralph_dir / HISTORY_DIR).mkdir()
+    (ralph_dir / HANDOFF_DIR).mkdir()
 
     write_status(Status.IDLE, temp_project)
     write_iteration(0, temp_project)
     write_done_count(0, temp_project)
     write_handoff(HANDOFF_TEMPLATE, temp_project)
     write_guardrails(GUARDRAILS_TEMPLATE, temp_project)
+    write_multi_state(
+        MultiSpecState(
+            version=1,
+            iteration=0,
+            status=Status.IDLE,
+            current_index=0,
+            specs=[],
+        ),
+        temp_project,
+    )
 
     return temp_project
 

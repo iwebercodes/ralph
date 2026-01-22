@@ -12,7 +12,7 @@ ralph reset [--keep-guardrails] [--keep-history]
 
 Clears Ralph's state so you can start a new task:
 - Resets iteration counter to 0
-- Clears handoff.md
+- Clears spec handoffs in `.ralph/handoffs/`
 - Sets status to IDLE
 - Optionally preserves guardrails and history
 

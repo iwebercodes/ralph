@@ -84,6 +84,6 @@ The agent will follow these alongside any it discovers.
 
 ## Related
 
-- [Handoff](./handoff.md) - The other persistent state
+- [Handoff](./handoff.md) - The other persistent state (per spec)
 - [ralph reset](../commands/reset.md) - Clearing or keeping guardrails
 - [Rotations](./rotations.md) - When guardrails get read

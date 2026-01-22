@@ -6,13 +6,21 @@ from pathlib import Path
 
 from ralph.core.agent import AgentResult
 from ralph.core.loop import (
+    IterationResult,
     format_log_entry,
     handle_status,
     run_loop,
     run_test_command,
 )
 from ralph.core.pool import AgentPool
-from ralph.core.state import Status, write_done_count, write_status
+from ralph.core.state import (
+    MultiSpecState,
+    SpecProgress,
+    Status,
+    get_handoff_path,
+    get_history_file,
+    write_status,
+)
 
 
 class TestRunTestCommand:
@@ -96,58 +104,72 @@ class TestFormatLogEntry:
 class TestHandleStatus:
     """Tests for handle_status function."""
 
+    def _state(self, done_counts: list[int]) -> MultiSpecState:
+        specs = [
+            SpecProgress(path=f"spec-{idx}.spec.md", done_count=done_count)
+            for idx, done_count in enumerate(done_counts)
+        ]
+        return MultiSpecState(
+            version=1,
+            iteration=0,
+            status=Status.CONTINUE,
+            current_index=0,
+            specs=specs,
+        )
+
     def test_stuck_exits_immediately(self, initialized_project: Path) -> None:
         """Test STUCK status exits with code 2."""
-        action, exit_code, done_count = handle_status(Status.STUCK, [], 0, initialized_project)
+        state = self._state([0])
+        action, exit_code, _, done_count = handle_status(state, 0, Status.STUCK, [])
         assert action == "exit"
         assert exit_code == 2
         assert done_count == 0
 
     def test_done_without_changes_increments(self, initialized_project: Path) -> None:
         """Test DONE without changes increments done_count."""
-        action, exit_code, done_count = handle_status(Status.DONE, [], 0, initialized_project)
+        state = self._state([0])
+        action, exit_code, _, done_count = handle_status(state, 0, Status.DONE, [])
         assert action == "continue"
         assert exit_code is None
         assert done_count == 1
 
     def test_done_with_changes_resets(self, initialized_project: Path) -> None:
         """Test DONE with changes resets done_count."""
-        write_done_count(2, initialized_project)
-        action, exit_code, done_count = handle_status(
-            Status.DONE, ["file.py"], 2, initialized_project
-        )
+        state = self._state([2, 1])
+        action, exit_code, new_state, done_count = handle_status(state, 0, Status.DONE, ["file.py"])
         assert action == "continue"
         assert exit_code is None
         assert done_count == 0
+        assert all(spec.done_count == 0 for spec in new_state.specs)
 
     def test_done_three_times_exits(self, initialized_project: Path) -> None:
         """Test DONE 3 times exits successfully."""
-        action, exit_code, done_count = handle_status(Status.DONE, [], 2, initialized_project)
+        state = self._state([2, 3])
+        action, exit_code, _, done_count = handle_status(state, 0, Status.DONE, [])
         assert action == "exit"
         assert exit_code == 0
         assert done_count == 3
 
     def test_rotate_resets_done_count(self, initialized_project: Path) -> None:
         """Test ROTATE resets done_count."""
-        write_done_count(1, initialized_project)
-        action, exit_code, done_count = handle_status(
-            Status.ROTATE, ["file.py"], 1, initialized_project
-        )
+        state = self._state([1])
+        action, exit_code, _, done_count = handle_status(state, 0, Status.ROTATE, ["file.py"])
         assert action == "continue"
         assert exit_code is None
         assert done_count == 0
 
     def test_continue_resets_done_count(self, initialized_project: Path) -> None:
         """Test CONTINUE resets done_count if it was > 0."""
-        write_done_count(1, initialized_project)
-        action, exit_code, done_count = handle_status(Status.CONTINUE, [], 1, initialized_project)
+        state = self._state([1])
+        action, exit_code, _, done_count = handle_status(state, 0, Status.CONTINUE, [])
         assert action == "continue"
         assert exit_code is None
         assert done_count == 0
 
     def test_continue_with_zero_done_count(self, initialized_project: Path) -> None:
         """Test CONTINUE with zero done_count stays at zero."""
-        action, exit_code, done_count = handle_status(Status.CONTINUE, [], 0, initialized_project)
+        state = self._state([0])
+        action, exit_code, _, done_count = handle_status(state, 0, Status.CONTINUE, [])
         assert action == "continue"
         assert exit_code is None
         assert done_count == 0
@@ -173,6 +195,7 @@ class ExhaustingAgent:
         prompt: str,
         timeout: int = 1800,
         output_file: Path | None = None,
+        crash_patterns: list[str] | None = None,
     ) -> AgentResult:
         self.invoke_count += 1
         if self._root:
@@ -229,3 +252,194 @@ class TestRunLoopWithExhaustion:
 
         assert result.exit_code == 4
         assert "exhausted" in result.message.lower()
+
+
+class CrashThenOkAgent:
+    """Mock agent that crashes once and then returns output."""
+
+    def __init__(self, root: Path):
+        self._root = root
+        self._calls = 0
+
+    @property
+    def name(self) -> str:
+        return "Crashy"
+
+    def is_available(self) -> bool:
+        return True
+
+    def invoke(
+        self,
+        prompt: str,
+        timeout: int = 1800,
+        output_file: Path | None = None,
+        crash_patterns: list[str] | None = None,
+    ) -> AgentResult:
+        self._calls += 1
+        if self._calls == 1:
+            return AgentResult("", 1, "ECONNRESET")
+        return AgentResult("ok", 0, None)
+
+    def is_exhausted(self, result: AgentResult) -> bool:
+        return False
+
+
+class ErrorPatternAgent:
+    """Mock agent that returns output but reports an error pattern."""
+
+    @property
+    def name(self) -> str:
+        return "Pattern"
+
+    def is_available(self) -> bool:
+        return True
+
+    def invoke(
+        self,
+        prompt: str,
+        timeout: int = 1800,
+        output_file: Path | None = None,
+        crash_patterns: list[str] | None = None,
+    ) -> AgentResult:
+        return AgentResult("ok", 0, "No messages returned")
+
+    def is_exhausted(self, result: AgentResult) -> bool:
+        return False
+
+
+class SuccessAgent:
+    """Mock agent that exits cleanly without writing status."""
+
+    @property
+    def name(self) -> str:
+        return "Success"
+
+    def is_available(self) -> bool:
+        return True
+
+    def invoke(
+        self,
+        prompt: str,
+        timeout: int = 1800,
+        output_file: Path | None = None,
+        crash_patterns: list[str] | None = None,
+    ) -> AgentResult:
+        return AgentResult("ok", 0, None)
+
+    def is_exhausted(self, result: AgentResult) -> bool:
+        return False
+
+
+class TestCrashHandling:
+    """Tests for crash detection and handling."""
+
+    def test_crash_triggers_rotate_and_logs(self, project_with_prompt: Path) -> None:
+        """Test crash detection writes handoff/history and continues."""
+        agent = CrashThenOkAgent(project_with_prompt)
+        pool = AgentPool([agent])
+        statuses: list[Status] = []
+
+        def on_iteration_end(
+            iteration: int,
+            result: IterationResult,
+            done_count: int,
+            agent_name: str,
+            spec_path: str,
+        ) -> None:
+            statuses.append(result.status)
+
+        result = run_loop(
+            max_iter=2,
+            test_cmd=None,
+            root=project_with_prompt,
+            agent_pool=pool,
+            on_iteration_end=on_iteration_end,
+        )
+
+        assert result.iterations_run == 2
+        assert statuses[0] == Status.ROTATE
+        handoff_path = get_handoff_path("PROMPT.md", project_with_prompt)
+        assert handoff_path.exists()
+        assert "Previous rotation crashed" in handoff_path.read_text(encoding="utf-8")
+
+        history_path = get_history_file(1, project_with_prompt, "PROMPT.md")
+        assert "CRASH DETECTED" in history_path.read_text(encoding="utf-8")
+
+    def test_error_pattern_triggers_crash(self, project_with_prompt: Path) -> None:
+        """Test stderr error pattern triggers crash handling."""
+        agent = ErrorPatternAgent()
+        pool = AgentPool([agent])
+        statuses: list[Status] = []
+
+        def on_iteration_end(
+            iteration: int,
+            result: IterationResult,
+            done_count: int,
+            agent_name: str,
+            spec_path: str,
+        ) -> None:
+            statuses.append(result.status)
+
+        run_loop(
+            max_iter=1,
+            test_cmd=None,
+            root=project_with_prompt,
+            agent_pool=pool,
+            on_iteration_end=on_iteration_end,
+        )
+
+        assert statuses == [Status.ROTATE]
+
+    def test_success_exit_does_not_mark_crash(self, project_with_prompt: Path) -> None:
+        """Test clean success does not append crash notes."""
+        agent = SuccessAgent()
+        pool = AgentPool([agent])
+
+        run_loop(
+            max_iter=1,
+            test_cmd=None,
+            root=project_with_prompt,
+            agent_pool=pool,
+        )
+
+        handoff_path = get_handoff_path("PROMPT.md", project_with_prompt)
+        assert not handoff_path.exists()
+
+    def test_crashed_agent_stays_in_pool(self, project_with_prompt: Path) -> None:
+        """Test that crashed agents remain in pool (vs exhausted agents which are removed)."""
+        agent = CrashThenOkAgent(project_with_prompt)
+        pool = AgentPool([agent])
+
+        # Before loop, pool has the agent
+        assert pool.available_agents == ["Crashy"]
+
+        run_loop(
+            max_iter=2,
+            test_cmd=None,
+            root=project_with_prompt,
+            agent_pool=pool,
+        )
+
+        # After crash + recovery, agent should still be in pool
+        assert pool.available_agents == ["Crashy"]
+
+    def test_exhausted_agent_removed_from_pool_but_crashed_stays(
+        self, project_with_prompt: Path
+    ) -> None:
+        """Test exhaustion removes agent from pool but crash does not."""
+        exhausting = ExhaustingAgent(name="Exhauster", root=project_with_prompt)
+        crashing = CrashThenOkAgent(project_with_prompt)
+        pool = AgentPool([exhausting, crashing])
+
+        # Both agents start in pool
+        assert set(pool.available_agents) == {"Exhauster", "Crashy"}
+
+        run_loop(
+            max_iter=5,
+            test_cmd=None,
+            root=project_with_prompt,
+            agent_pool=pool,
+        )
+
+        # Exhausted agent should be removed, but crashed agent should remain
+        assert pool.available_agents == ["Crashy"]

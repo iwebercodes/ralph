@@ -36,6 +36,7 @@ class Agent(Protocol):
         prompt: str,
         timeout: int | None = 10800,
         output_file: Path | None = None,
+        crash_patterns: list[str] | None = None,
     ) -> AgentResult:
         """Invoke the agent with a prompt.
 
@@ -43,6 +44,8 @@ class Agent(Protocol):
             prompt: The prompt to send to the agent
             timeout: Timeout in seconds (default 3 hours), None for no timeout
             output_file: Optional file to stream output to in real time
+            crash_patterns: Regex patterns to monitor in stderr. If a pattern
+                matches, the process is killed immediately.
 
         Returns:
             AgentResult with output, exit code, and any error message
@@ -86,6 +89,7 @@ class ClaudeAgent:
         prompt: str,
         timeout: int | None = 10800,
         output_file: Path | None = None,
+        crash_patterns: list[str] | None = None,
     ) -> AgentResult:
         """Invoke Claude CLI with the given prompt."""
         claude_path = shutil.which("claude")
@@ -111,6 +115,7 @@ class ClaudeAgent:
             output_file=output_file,
             timeout_message="Claude invocation timed out",
             not_found_message="claude CLI not found in PATH",
+            crash_patterns=crash_patterns,
         )
 
     def is_exhausted(self, result: AgentResult) -> bool:
@@ -146,6 +151,7 @@ class CodexAgent:
         prompt: str,
         timeout: int | None = 10800,
         output_file: Path | None = None,
+        crash_patterns: list[str] | None = None,
     ) -> AgentResult:
         """Invoke Codex CLI with the given prompt."""
         codex_path = shutil.which("codex")
@@ -172,6 +178,7 @@ class CodexAgent:
             output_file=output_file,
             timeout_message="Codex invocation timed out",
             not_found_message="codex CLI not found in PATH",
+            crash_patterns=crash_patterns,
         )
 
     def is_exhausted(self, result: AgentResult) -> bool:
@@ -188,6 +195,7 @@ def _invoke_command(
     output_file: Path | None,
     timeout_message: str,
     not_found_message: str,
+    crash_patterns: list[str] | None = None,
 ) -> AgentResult:
     """Invoke a command with optional streaming to a file."""
     try:
@@ -204,7 +212,7 @@ def _invoke_command(
                 error=result.stderr or None,
             )
 
-        return _invoke_with_streaming(cmd, timeout, output_file)
+        return _invoke_with_streaming(cmd, timeout, output_file, crash_patterns)
     except subprocess.TimeoutExpired:
         return AgentResult(
             output="",
@@ -223,22 +231,43 @@ def _invoke_with_streaming(
     cmd: list[str],
     timeout: int | None,
     output_file: Path,
+    crash_patterns: list[str] | None = None,
 ) -> AgentResult:
-    """Invoke a command while streaming output line-by-line to a file."""
+    """Invoke a command while streaming output line-by-line to a file.
+
+    If crash_patterns is provided, stderr is monitored in real-time. When a
+    crash pattern is detected, the process is killed immediately.
+    """
     output_file.parent.mkdir(parents=True, exist_ok=True)
     stdout_lines: list[str] = []
     stderr_lines: list[str] = []
     lock = threading.Lock()
+    crash_detected = threading.Event()
 
-    def _read_stream(stream: TextIO, buffer: list[str]) -> None:
+    def _read_stdout(stream: TextIO) -> None:
         while True:
             line = stream.readline()
             if line == "":
                 break
-            buffer.append(line)
+            stdout_lines.append(line)
             with lock:
                 log_file.write(line)
                 log_file.flush()
+
+    def _read_stderr(stream: TextIO) -> None:
+        while True:
+            line = stream.readline()
+            if line == "":
+                break
+            stderr_lines.append(line)
+            with lock:
+                log_file.write(line)
+                log_file.flush()
+            if crash_patterns:
+                for pattern in crash_patterns:
+                    if re.search(pattern, line, re.IGNORECASE):
+                        crash_detected.set()
+                        return
 
     with output_file.open("a", encoding="utf-8") as log_file:
         process = subprocess.Popen(
@@ -252,26 +281,42 @@ def _invoke_with_streaming(
         if process.stdout is None or process.stderr is None:
             raise RuntimeError("Failed to capture subprocess output")
 
-        threads = [
-            threading.Thread(target=_read_stream, args=(process.stdout, stdout_lines)),
-            threading.Thread(target=_read_stream, args=(process.stderr, stderr_lines)),
-        ]
-        for thread in threads:
-            thread.daemon = True
-            thread.start()
+        stdout_thread = threading.Thread(target=_read_stdout, args=(process.stdout,))
+        stderr_thread = threading.Thread(target=_read_stderr, args=(process.stderr,))
+        stdout_thread.daemon = True
+        stderr_thread.daemon = True
+        stdout_thread.start()
+        stderr_thread.start()
 
         try:
-            process.wait(timeout=timeout)
+            # Poll for process completion or crash detection
+            elapsed = 0.0
+            poll_interval = 0.1
+            while True:
+                if crash_detected.is_set():
+                    process.kill()
+                    process.wait()
+                    break
+                try:
+                    process.wait(timeout=poll_interval)
+                    break  # Process finished normally
+                except subprocess.TimeoutExpired:
+                    elapsed += poll_interval
+                    if timeout is not None and elapsed >= timeout:
+                        process.kill()
+                        process.wait()
+                        raise subprocess.TimeoutExpired(cmd, timeout) from None
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait()
             raise
         finally:
-            for thread in threads:
-                thread.join()
+            stdout_thread.join(timeout=1.0)
+            stderr_thread.join(timeout=1.0)
 
     output = "".join(stdout_lines)
     error = "".join(stderr_lines)
+
     return AgentResult(
         output=output,
         exit_code=process.returncode or 0,

@@ -27,7 +27,7 @@ Look for:
 
 ```bash
 ralph history
-cat .ralph/handoff.md
+ls .ralph/handoffs
 ```
 
 Is real progress being made? Or is work being repeated?
@@ -109,7 +109,7 @@ If done_count is 2/3 or 3/3, the task might be complete - it just ran out of ite
 
 Look at what was accomplished:
 ```bash
-cat .ralph/handoff.md
+ls .ralph/handoffs
 ```
 
 ## Related
