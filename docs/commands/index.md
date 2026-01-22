@@ -1,11 +1,12 @@
 # Commands
 
-Ralph has six commands and a global `--about` flag. Here's when to use each one.
+Ralph has six commands and global flags. Here's when to use each one.
 
 ## Global Flags
 
 | Flag | Description |
 |------|-------------|
+| `ralph --version` | Show installed version |
 | `ralph --about` | Show comprehensive explanation of how Ralph works (great for AI agents) |
 | `ralph --help` | Show command help |
 

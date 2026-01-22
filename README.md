@@ -76,6 +76,7 @@ Ralph uses more tokens than running Claude directly. Each rotation is a fresh AP
 | `ralph status` | Show current progress |
 | `ralph reset` | Start fresh |
 | `ralph history` | View logs from previous sessions |
+| `ralph --version` | Show installed version |
 | `ralph --about` | Show comprehensive explanation (useful for AI agents) |
 
 ## Configuration

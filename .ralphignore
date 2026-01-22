@@ -1,2 +1,35 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+
+# Build artifacts and generated files
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Testing & coverage
 .coverage
+.pytest_cache/
+htmlcov/
+
+# Type checking & linting caches
+.mypy_cache/
+.ruff_cache/
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS-generated files
+.DS_Store
+
+# Specs (don't trigger rotation resets when specs change)
 specs/

@@ -80,9 +80,11 @@ ralph reset --keep-guardrails
 
 If none of the troubleshooting pages help:
 
-1. Check if the issue is with the agent CLI itself (not Ralph)
-2. Try a simpler task to verify Ralph is working
-3. File an issue with:
+1. Check your version: `ralph --version`
+2. Check if the issue is with the agent CLI itself (not Ralph)
+3. Try a simpler task to verify Ralph is working
+4. File an issue with:
+   - Your Ralph version (`ralph --version`)
    - Your PROMPT.md
    - Output from `ralph history --list`
    - What you expected vs what happened
