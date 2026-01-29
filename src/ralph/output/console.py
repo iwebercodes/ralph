@@ -112,9 +112,11 @@ class Console:
         status: Status,
         files_changed: list[str],
         done_count: int,
+        agent_removals: tuple[tuple[str, str], ...] | None = None,
     ) -> None:
         """Print rotation completion and close the box."""
         change_count = len(files_changed)
+        removals = agent_removals or ()
 
         if self._is_tty:
             self._print(self._box_mid("Rotation complete"))
@@ -141,6 +143,12 @@ class Console:
                 files_str = self._colors.yellow(f"{change_count} files changed")
                 self._print(self._box_line(f"Files:        {files_str}"))
 
+            if removals:
+                for agent_name, reason in removals:
+                    line = f"Agent:        {agent_name} removed ({reason})"
+                    line = self._colors.yellow(line)
+                    self._print(self._box_line(line, color_fn=self._colors.yellow))
+
             # Show verification status for DONE
             if status == Status.DONE:
                 circles = self._verification_circles(done_count)
@@ -158,6 +166,8 @@ class Console:
             else:
                 changes_str = f"{change_count} files changed"
             self._print(f"[ralph] Result: {status.value} ({changes_str})")
+            for agent_name, reason in removals:
+                self._print(f"[ralph] Agent removed: {agent_name} ({reason})")
             if status == Status.DONE:
                 circles = self._verification_circles(done_count)
                 self._print(f"[ralph] Verification: {done_count}/3 {circles}")

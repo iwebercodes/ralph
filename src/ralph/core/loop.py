@@ -49,6 +49,7 @@ class IterationResult(NamedTuple):
     test_result: tuple[int, str] | None  # (exit_code, output) or None
     claude_output: str  # Kept for backward compatibility
     agent_result: AgentResult | None = None  # Full result for exhaustion checking
+    agent_removals: tuple[tuple[str, str], ...] = ()
 
 
 class LoopResult(NamedTuple):
@@ -504,12 +505,13 @@ def run_loop(
                 output_file=output_file,
             )
 
-            # Check if agent is exhausted
+            agent_exhausted = False
             if result.agent_result and agent.is_exhausted(result.agent_result):
+                reason = agent.exhaustion_reason(result.agent_result) or "exhausted"
+                removals = result.agent_removals + ((agent.name, reason),)
+                result = result._replace(agent_removals=removals)
                 agent_pool.remove(agent)
-                # If this was our last agent, exit
-                if agent_pool.is_empty():
-                    return LoopResult(4, "All agents exhausted", iterations_run)
+                agent_exhausted = True
 
             action, exit_code, state, spec_done_count = handle_status(
                 state,
@@ -528,6 +530,9 @@ def run_loop(
                     agent.name,
                     current_spec.path,
                 )
+
+            if agent_exhausted and agent_pool.is_empty():
+                return LoopResult(4, "All agents exhausted", iterations_run)
 
             if action == "exit":
                 if exit_code == 0:

@@ -175,6 +175,7 @@ After installing, verify with: claude --version or codex --version"""
             result.status,
             result.files_changed,
             done_count,
+            result.agent_removals,
         )
 
         if result.test_result:

@@ -205,6 +205,11 @@ class ExhaustingAgent:
     def is_exhausted(self, result: AgentResult) -> bool:
         return result.error is not None and "rate limit" in result.error.lower()
 
+    def exhaustion_reason(self, result: AgentResult) -> str | None:
+        if result.error and "rate limit" in result.error.lower():
+            return "rate limit"
+        return None
+
 
 class TestRunLoopWithExhaustion:
     """Tests for run_loop when agents become exhausted."""
@@ -238,6 +243,63 @@ class TestRunLoopWithExhaustion:
         )
 
         assert result.exit_code == 4
+
+    def test_agent_removal_reported_in_callback(self, project_with_prompt: Path) -> None:
+        """Test that agent removal is reported via on_iteration_end callback."""
+        agent = ExhaustingAgent(name="TestAgent", root=project_with_prompt)
+        pool = AgentPool([agent])
+        captured_removals: list[tuple[tuple[str, str], ...]] = []
+
+        def on_iteration_end(
+            iteration: int,
+            result: IterationResult,
+            done_count: int,
+            agent_name: str,
+            spec_path: str,
+        ) -> None:
+            captured_removals.append(result.agent_removals)
+
+        run_loop(
+            max_iter=10,
+            test_cmd=None,
+            root=project_with_prompt,
+            agent_pool=pool,
+            on_iteration_end=on_iteration_end,
+        )
+
+        # Should have one iteration with one removal
+        assert len(captured_removals) == 1
+        assert captured_removals[0] == (("TestAgent", "rate limit"),)
+
+    def test_multiple_agents_each_removal_reported(self, project_with_prompt: Path) -> None:
+        """Test that each agent removal is reported in its own iteration."""
+        agent1 = ExhaustingAgent(name="Agent1", root=project_with_prompt)
+        agent2 = ExhaustingAgent(name="Agent2", root=project_with_prompt)
+        pool = AgentPool([agent1, agent2])
+        captured_removals: list[tuple[tuple[str, str], ...]] = []
+
+        def on_iteration_end(
+            iteration: int,
+            result: IterationResult,
+            done_count: int,
+            agent_name: str,
+            spec_path: str,
+        ) -> None:
+            captured_removals.append(result.agent_removals)
+
+        run_loop(
+            max_iter=10,
+            test_cmd=None,
+            root=project_with_prompt,
+            agent_pool=pool,
+            on_iteration_end=on_iteration_end,
+        )
+
+        # Should have two iterations, each with one removal
+        assert len(captured_removals) == 2
+        # Each iteration should report exactly one removal
+        removal_names = {r[0][0] for r in captured_removals if r}
+        assert removal_names == {"Agent1", "Agent2"}
 
     def test_empty_pool_returns_exit_code_4(self, project_with_prompt: Path) -> None:
         """Test that an empty pool immediately returns exit code 4."""

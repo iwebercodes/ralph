@@ -63,6 +63,10 @@ class Agent(Protocol):
         """
         ...
 
+    def exhaustion_reason(self, result: AgentResult) -> str | None:
+        """Return the matched exhaustion reason, if any."""
+        ...
+
 
 class ClaudeAgent:
     """Agent implementation using Claude CLI."""
@@ -120,10 +124,11 @@ class ClaudeAgent:
 
     def is_exhausted(self, result: AgentResult) -> bool:
         """Check if Claude is exhausted based on error output."""
-        if not result.error:
-            return False
-        error_lower = result.error.lower()
-        return any(re.search(pattern, error_lower) for pattern in self._EXHAUSTION_PATTERNS)
+        return _extract_exhaustion_reason(self._EXHAUSTION_PATTERNS, result.error) is not None
+
+    def exhaustion_reason(self, result: AgentResult) -> str | None:
+        """Return the matched exhaustion reason, if any."""
+        return _extract_exhaustion_reason(self._EXHAUSTION_PATTERNS, result.error)
 
 
 class CodexAgent:
@@ -183,10 +188,25 @@ class CodexAgent:
 
     def is_exhausted(self, result: AgentResult) -> bool:
         """Check if Codex is exhausted based on error output."""
-        if not result.error:
-            return False
-        error_lower = result.error.lower()
-        return any(re.search(pattern, error_lower) for pattern in self._EXHAUSTION_PATTERNS)
+        return _extract_exhaustion_reason(self._EXHAUSTION_PATTERNS, result.error) is not None
+
+    def exhaustion_reason(self, result: AgentResult) -> str | None:
+        """Return the matched exhaustion reason, if any."""
+        return _extract_exhaustion_reason(self._EXHAUSTION_PATTERNS, result.error)
+
+
+def _extract_exhaustion_reason(patterns: list[str], error: str | None) -> str | None:
+    if not error:
+        return None
+    error_lower = error.lower()
+    for pattern in patterns:
+        match = re.search(pattern, error_lower)
+        if match:
+            reason = match.group(0)
+            reason = re.sub(r"[_\W]+", " ", reason)
+            reason = re.sub(r"\s+", " ", reason).strip()
+            return reason
+    return None
 
 
 def _invoke_command(

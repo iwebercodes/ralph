@@ -85,6 +85,20 @@ class TestConsole:
         assert "ROTATE" in output
         assert "2 files" in output
 
+    def test_rotation_complete_non_tty_agent_removed(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Test rotation complete with agent removal for non-TTY output."""
+        console = Console(no_color=True)
+        console.rotation_complete(
+            Status.ROTATE,
+            ["file1.py"],
+            0,
+            agent_removals=(("Codex", "rate limit"),),
+        )
+        output = capsys.readouterr().out
+        assert "Agent removed: Codex (rate limit)" in output
+
     def test_rotation_complete_no_changes(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Test rotation complete with no changes."""
         console = Console(no_color=True)
@@ -229,6 +243,20 @@ class TestConsoleTTY:
         assert "Rotation complete" in output
         assert "ROTATE" in output
         assert "2 files" in output
+
+    def test_rotation_complete_tty_agent_removed(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Test rotation complete with agent removal for TTY."""
+        console = Console(no_color=True)
+        console._is_tty = True
+        console.rotation_complete(
+            Status.ROTATE,
+            ["file1.py"],
+            0,
+            agent_removals=(("Claude", "quota exceeded"),),
+        )
+        output = capsys.readouterr().out
+        assert "Agent:" in output
+        assert "Claude removed (quota exceeded)" in output
 
     def test_rotation_complete_tty_done(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Test rotation complete with DONE status for TTY."""
