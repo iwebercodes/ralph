@@ -134,13 +134,12 @@ class ClaudeAgent:
 class CodexAgent:
     """Agent implementation using OpenAI Codex CLI."""
 
+    # Specific patterns that only match actual exhaustion errors.
+    # These are designed to avoid false positives from informational stderr output.
     _EXHAUSTION_PATTERNS = [
-        r"rate.?limit",
-        r"quota.?exceeded",
-        r"token.?limit",
-        r"usage.?limit",
-        r"rate_limit_exceeded",
-        r"daily.?limit",
+        r"usage_limit_reached",  # API error type from JSON response
+        r"429 Too Many Requests",  # HTTP status code
+        r"You've hit your usage limit",  # Unambiguous error message
     ]
 
     @property
@@ -187,12 +186,27 @@ class CodexAgent:
         )
 
     def is_exhausted(self, result: AgentResult) -> bool:
-        """Check if Codex is exhausted based on error output."""
-        return _extract_exhaustion_reason(self._EXHAUSTION_PATTERNS, result.error) is not None
+        """Check if Codex is exhausted based on error output.
+
+        Only returns True if:
+        1. The exit code indicates failure (non-zero)
+        2. The stderr contains a specific exhaustion pattern
+        """
+        if result.exit_code == 0:
+            return False
+        return _codex_extract_exhaustion_info(result.error) is not None
 
     def exhaustion_reason(self, result: AgentResult) -> str | None:
-        """Return the matched exhaustion reason, if any."""
-        return _extract_exhaustion_reason(self._EXHAUSTION_PATTERNS, result.error)
+        """Return a human-readable exhaustion reason with reset time if available."""
+        if result.exit_code == 0:
+            return None
+        info = _codex_extract_exhaustion_info(result.error)
+        if info is None:
+            return None
+        pattern, reset_seconds = info
+        if reset_seconds is not None:
+            return f"{pattern} (resets in {_format_duration(reset_seconds)})"
+        return pattern
 
 
 def _extract_exhaustion_reason(patterns: list[str], error: str | None) -> str | None:
@@ -207,6 +221,60 @@ def _extract_exhaustion_reason(patterns: list[str], error: str | None) -> str | 
             reason = re.sub(r"\s+", " ", reason).strip()
             return reason
     return None
+
+
+def _codex_extract_exhaustion_info(error: str | None) -> tuple[str, int | None] | None:
+    """Extract exhaustion pattern and reset time from Codex error output.
+
+    Returns:
+        A tuple of (pattern_matched, reset_seconds) if exhaustion detected,
+        where reset_seconds may be None if not available. Returns None if
+        no exhaustion pattern matched.
+    """
+    if not error:
+        return None
+
+    # Check for specific exhaustion patterns
+    patterns = [
+        (r"usage_limit_reached", "usage limit reached"),
+        (r"429 Too Many Requests", "429 Too Many Requests"),
+        (r"You've hit your usage limit", "usage limit reached"),
+    ]
+
+    matched_reason = None
+    for pattern, reason in patterns:
+        if re.search(pattern, error):
+            matched_reason = reason
+            break
+
+    if matched_reason is None:
+        return None
+
+    # Try to extract reset time from JSON error (handles both escaped and unescaped quotes)
+    reset_seconds = None
+    reset_match = re.search(r'(?:\\"|")?resets_in_seconds(?:\\"|")?\s*:\s*(\d+)', error)
+    if reset_match:
+        reset_seconds = int(reset_match.group(1))
+
+    return (matched_reason, reset_seconds)
+
+
+def _format_duration(seconds: int) -> str:
+    """Format a duration in seconds as a human-readable string."""
+    if seconds < 60:
+        return f"{seconds} seconds"
+    minutes = seconds // 60
+    if minutes < 60:
+        return f"{minutes} minutes" if minutes > 1 else "1 minute"
+    hours = minutes // 60
+    remaining_minutes = minutes % 60
+    if remaining_minutes == 0:
+        return f"{hours} hours" if hours > 1 else "1 hour"
+    return (
+        f"{hours} hours {remaining_minutes} minutes"
+        if hours > 1
+        else f"1 hour {remaining_minutes} minutes"
+    )
 
 
 def _invoke_command(

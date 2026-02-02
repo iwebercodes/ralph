@@ -52,6 +52,9 @@ line-length = 100
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "SIM"]
 
+[tool.ruff.lint.per-file-ignores]
+"tests/test_core/test_agent.py" = ["E501"]  # Test fixtures contain real log output with long lines
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v --cov=ralph --cov-report=term-missing"

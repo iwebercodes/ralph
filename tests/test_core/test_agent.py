@@ -254,22 +254,60 @@ class TestCodexAgent:
         result = AgentResult(output="Normal output", exit_code=0, error=None)
         assert agent.is_exhausted(result) is False
 
-    def test_is_exhausted_true_for_rate_limit_in_stderr(self) -> None:
-        """Test is_exhausted returns True for rate_limit_exceeded in stderr."""
+    def test_is_exhausted_false_for_exit_code_zero(self) -> None:
+        """Test is_exhausted returns False when exit code is 0, regardless of stderr."""
         agent = CodexAgent()
-        result = AgentResult(output="", exit_code=1, error="rate_limit_exceeded")
-        assert agent.is_exhausted(result) is True
-
-    def test_is_exhausted_false_for_rate_limit_in_stdout(self) -> None:
-        """Test is_exhausted returns False for rate_limit_exceeded in stdout."""
-        agent = CodexAgent()
-        result = AgentResult(output="Error: rate_limit_exceeded", exit_code=1, error=None)
+        # Even if stderr mentions usage limits, exit code 0 means success
+        result = AgentResult(
+            output="Success",
+            exit_code=0,
+            error="Discussing token limits and usage_limit_reached in context",
+        )
         assert agent.is_exhausted(result) is False
 
-    def test_is_exhausted_true_for_daily_limit(self) -> None:
-        """Test is_exhausted returns True for daily limit error."""
+    def test_is_exhausted_false_for_broad_patterns(self) -> None:
+        """Test is_exhausted ignores broad patterns that caused false positives."""
         agent = CodexAgent()
-        result = AgentResult(output="", exit_code=1, error="daily limit reached")
+        # These broad patterns used to trigger false positives
+        broad_error_messages = [
+            "rate limit discussion in the context",
+            "token limit explained in documentation",
+            "usage limit is configurable",
+            "daily limit for API calls",
+            "rate_limit_exceeded in the log",
+        ]
+        for error in broad_error_messages:
+            result = AgentResult(output="", exit_code=1, error=error)
+            assert agent.is_exhausted(result) is False, f"False positive for: {error}"
+
+    def test_is_exhausted_true_for_usage_limit_reached(self) -> None:
+        """Test is_exhausted detects usage_limit_reached API error type."""
+        agent = CodexAgent()
+        result = AgentResult(
+            output="",
+            exit_code=1,
+            error='error=http 429: {"error":{"type":"usage_limit_reached"}}',
+        )
+        assert agent.is_exhausted(result) is True
+
+    def test_is_exhausted_true_for_429_status(self) -> None:
+        """Test is_exhausted detects 429 Too Many Requests HTTP status."""
+        agent = CodexAgent()
+        result = AgentResult(
+            output="",
+            exit_code=1,
+            error="error=http 429 Too Many Requests: ...",
+        )
+        assert agent.is_exhausted(result) is True
+
+    def test_is_exhausted_true_for_hit_usage_limit_message(self) -> None:
+        """Test is_exhausted detects 'You've hit your usage limit' message."""
+        agent = CodexAgent()
+        result = AgentResult(
+            output="",
+            exit_code=1,
+            error="ERROR: You've hit your usage limit. Upgrade to Pro...",
+        )
         assert agent.is_exhausted(result) is True
 
     def test_is_exhausted_false_for_prompt_content_in_output(self) -> None:
@@ -357,6 +395,152 @@ class TestCodexAgent:
         agent = CodexAgent()
         result = AgentResult(output="Normal text without limit words", exit_code=0, error=None)
         assert agent.is_exhausted(result) is False
+
+    def test_exhaustion_reason_returns_none_for_exit_code_zero(self) -> None:
+        """Test exhaustion_reason returns None when exit code is 0."""
+        agent = CodexAgent()
+        result = AgentResult(
+            output="",
+            exit_code=0,
+            error="usage_limit_reached",
+        )
+        assert agent.exhaustion_reason(result) is None
+
+    def test_exhaustion_reason_includes_reset_time(self) -> None:
+        """Test exhaustion_reason extracts and formats reset time from JSON error."""
+        agent = CodexAgent()
+        result = AgentResult(
+            output="",
+            exit_code=1,
+            error='{"error":{"type":"usage_limit_reached","resets_in_seconds":2021}}',
+        )
+        reason = agent.exhaustion_reason(result)
+        assert reason is not None
+        assert "usage limit reached" in reason
+        assert "33 minutes" in reason  # 2021 seconds ≈ 33 minutes
+
+    def test_exhaustion_reason_without_reset_time(self) -> None:
+        """Test exhaustion_reason works without reset time."""
+        agent = CodexAgent()
+        result = AgentResult(
+            output="",
+            exit_code=1,
+            error="You've hit your usage limit. Upgrade to Pro.",
+        )
+        reason = agent.exhaustion_reason(result)
+        assert reason == "usage limit reached"
+
+
+class TestCodexExhaustionRealStderr:
+    """Integration tests with real Codex stderr samples."""
+
+    # Real stderr output from Codex when hitting usage limit
+    REAL_EXHAUSTION_STDERR = """OpenAI Codex v0.88.0 (research preview)
+--------
+workdir: /path/to/project
+model: gpt-5.2-codex
+provider: openai
+approval: never
+sandbox: danger-full-access
+reasoning effort: none
+reasoning summaries: auto
+session id: abc-123-def
+--------
+user
+Say hello
+mcp startup: no servers
+2026-01-29T23:21:37.939876Z ERROR codex_api::endpoint::responses: error=http 429 Too Many Requests: Some("{\\"error\\":{\\"type\\":\\"usage_limit_reached\\",\\"message\\":\\"The usage limit has been reached\\",\\"plan_type\\":\\"plus\\",\\"resets_at\\":1769730918,\\"resets_in_seconds\\":2021}}")
+ERROR: You've hit your usage limit. Upgrade to Pro (https://openai.com/chatgpt/pricing), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 12:55 AM."""
+
+    # Normal operational stderr from Codex
+    NORMAL_OPERATIONAL_STDERR = """OpenAI Codex v0.88.0 (research preview)
+--------
+workdir: /path/to/project
+model: gpt-5.2-codex
+provider: openai
+approval: never
+sandbox: danger-full-access
+reasoning effort: none
+reasoning summaries: auto
+session id: xyz-789-uvw
+--------
+user
+Please implement a function that checks token limits and handles usage limits gracefully
+mcp startup: no servers
+thinking...
+The function should consider the context window token limit when processing input."""
+
+    def test_real_exhaustion_stderr_detected(self) -> None:
+        """Test that real exhaustion stderr triggers detection with exit code 1."""
+        agent = CodexAgent()
+        result = AgentResult(
+            output="",
+            exit_code=1,
+            error=self.REAL_EXHAUSTION_STDERR,
+        )
+        assert agent.is_exhausted(result) is True
+
+    def test_real_exhaustion_stderr_extracts_reset_time(self) -> None:
+        """Test that reset time is extracted from real exhaustion stderr."""
+        agent = CodexAgent()
+        result = AgentResult(
+            output="",
+            exit_code=1,
+            error=self.REAL_EXHAUSTION_STDERR,
+        )
+        reason = agent.exhaustion_reason(result)
+        assert reason is not None
+        assert "33 minutes" in reason  # 2021 seconds ≈ 33 minutes
+
+    def test_normal_operational_stderr_not_detected_with_exit_0(self) -> None:
+        """Test that normal operational stderr with exit 0 is not detected."""
+        agent = CodexAgent()
+        result = AgentResult(
+            output="Function implemented successfully",
+            exit_code=0,
+            error=self.NORMAL_OPERATIONAL_STDERR,
+        )
+        assert agent.is_exhausted(result) is False
+
+    def test_normal_operational_stderr_not_detected_with_exit_1(self) -> None:
+        """Test that normal operational stderr without specific patterns is not detected."""
+        agent = CodexAgent()
+        # Even with exit code 1, the normal operational stderr shouldn't trigger
+        # because it doesn't contain the specific exhaustion patterns
+        result = AgentResult(
+            output="",
+            exit_code=1,
+            error=self.NORMAL_OPERATIONAL_STDERR,
+        )
+        assert agent.is_exhausted(result) is False
+
+    def test_all_three_patterns_detected(self) -> None:
+        """Test that each specific pattern correctly identifies exhaustion."""
+        agent = CodexAgent()
+
+        # Pattern 1: usage_limit_reached (API error type)
+        result1 = AgentResult(
+            output="",
+            exit_code=1,
+            error='{"error":{"type":"usage_limit_reached"}}',
+        )
+        assert agent.is_exhausted(result1) is True
+
+        # Pattern 2: 429 Too Many Requests (HTTP status)
+        result2 = AgentResult(
+            output="",
+            exit_code=1,
+            error="error=http 429 Too Many Requests: ...",
+        )
+        assert agent.is_exhausted(result2) is True
+
+        # Pattern 3: You've hit your usage limit (error message)
+        result3 = AgentResult(
+            output="",
+            exit_code=1,
+            error="ERROR: You've hit your usage limit. Upgrade to Pro",
+        )
+        assert agent.is_exhausted(result3) is True
 
 
 class TestRealTimeStderrMonitoring:
