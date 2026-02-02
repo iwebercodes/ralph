@@ -257,3 +257,241 @@ def test_unchanged_specs_preserve_progress(initialized_project: Path) -> None:
     assert result.specs[0].done_count == 2
     assert result.specs[1].done_count == 1
     assert result.current_index == 1
+
+
+# Smart spec sorting tests
+
+
+def test_spec_priority_new_specs_first() -> None:
+    """New specs (no last_status) have highest priority."""
+    from ralph.core.state import spec_priority
+
+    new_spec = SpecProgress(path="new.spec.md", done_count=0, last_status=None)
+    continue_spec = SpecProgress(path="active.spec.md", done_count=0, last_status="CONTINUE")
+    done_spec = SpecProgress(path="done.spec.md", done_count=3, last_status="DONE")
+
+    assert spec_priority(new_spec) == 0
+    assert spec_priority(continue_spec) == 1
+    assert spec_priority(done_spec) == 2
+    assert spec_priority(new_spec) < spec_priority(continue_spec) < spec_priority(done_spec)
+
+
+def test_spec_priority_non_done_before_done() -> None:
+    """Non-DONE statuses (CONTINUE, ROTATE, STUCK) have higher priority than DONE."""
+    from ralph.core.state import spec_priority
+
+    continue_spec = SpecProgress(path="a.spec.md", done_count=0, last_status="CONTINUE")
+    rotate_spec = SpecProgress(path="b.spec.md", done_count=0, last_status="ROTATE")
+    stuck_spec = SpecProgress(path="c.spec.md", done_count=0, last_status="STUCK")
+    done_spec = SpecProgress(path="d.spec.md", done_count=3, last_status="DONE")
+
+    # All non-DONE have same priority tier
+    assert spec_priority(continue_spec) == spec_priority(rotate_spec) == spec_priority(stuck_spec)
+    # But lower than DONE
+    assert spec_priority(continue_spec) < spec_priority(done_spec)
+
+
+def test_sort_specs_by_priority_basic() -> None:
+    """Specs sort by priority: new > non-DONE > DONE."""
+    from ralph.core.state import sort_specs_by_priority
+
+    specs = [
+        SpecProgress(path="done.spec.md", done_count=3, last_status="DONE"),
+        SpecProgress(path="new.spec.md", done_count=0, last_status=None),
+        SpecProgress(path="active.spec.md", done_count=0, last_status="CONTINUE"),
+    ]
+
+    sorted_specs = sort_specs_by_priority(specs)
+    paths = [s.path for s in sorted_specs]
+
+    assert paths == ["new.spec.md", "active.spec.md", "done.spec.md"]
+
+
+def test_sort_specs_by_priority_stable_within_tier() -> None:
+    """Sorting is stable within the same priority tier."""
+    from ralph.core.state import sort_specs_by_priority
+
+    specs = [
+        SpecProgress(path="b.spec.md", done_count=3, last_status="DONE"),
+        SpecProgress(path="c.spec.md", done_count=3, last_status="DONE"),
+        SpecProgress(path="a.spec.md", done_count=3, last_status="DONE"),
+    ]
+
+    sorted_specs = sort_specs_by_priority(specs)
+    paths = [s.path for s in sorted_specs]
+
+    # Original order maintained within same priority tier
+    assert paths == ["b.spec.md", "c.spec.md", "a.spec.md"]
+
+
+def test_sort_specs_by_priority_new_specs_sorted_stably() -> None:
+    """Multiple new specs maintain their original order."""
+    from ralph.core.state import sort_specs_by_priority
+
+    specs = [
+        SpecProgress(path="done.spec.md", done_count=3, last_status="DONE"),
+        SpecProgress(path="new-z.spec.md", done_count=0, last_status=None),
+        SpecProgress(path="new-a.spec.md", done_count=0, last_status=None),
+    ]
+
+    sorted_specs = sort_specs_by_priority(specs)
+    paths = [s.path for s in sorted_specs]
+
+    # New specs come first, maintaining original order
+    assert paths == ["new-z.spec.md", "new-a.spec.md", "done.spec.md"]
+
+
+def test_last_status_persisted_in_state_json(initialized_project: Path) -> None:
+    """last_status is saved to and loaded from state.json."""
+    from ralph.core.state import read_multi_state, write_multi_state
+
+    state = MultiSpecState(
+        version=1,
+        iteration=5,
+        status=Status.CONTINUE,
+        current_index=0,
+        specs=[
+            SpecProgress(path="a.spec.md", done_count=0, last_status="CONTINUE"),
+            SpecProgress(path="b.spec.md", done_count=3, last_status="DONE"),
+            SpecProgress(path="c.spec.md", done_count=0, last_status=None),
+        ],
+    )
+    write_multi_state(state, initialized_project)
+
+    loaded = read_multi_state(initialized_project)
+    assert loaded is not None
+    assert loaded.specs[0].last_status == "CONTINUE"
+    assert loaded.specs[1].last_status == "DONE"
+    assert loaded.specs[2].last_status is None
+
+
+def test_ensure_state_preserves_last_status(initialized_project: Path) -> None:
+    """ensure_state preserves last_status when specs haven't changed."""
+    from ralph.core.state import ensure_state, write_multi_state
+
+    initial_state = MultiSpecState(
+        version=1,
+        iteration=5,
+        status=Status.CONTINUE,
+        current_index=0,
+        specs=[
+            SpecProgress(path="a.spec.md", done_count=0, last_status="CONTINUE"),
+            SpecProgress(path="b.spec.md", done_count=3, last_status="DONE"),
+        ],
+    )
+    write_multi_state(initial_state, initialized_project)
+
+    result = ensure_state(["a.spec.md", "b.spec.md"], initialized_project)
+
+    assert result.specs[0].last_status == "CONTINUE"
+    assert result.specs[1].last_status == "DONE"
+
+
+def test_ensure_state_clears_last_status_on_spec_change(initialized_project: Path) -> None:
+    """ensure_state clears last_status when spec list changes."""
+    from ralph.core.state import ensure_state, write_multi_state
+
+    initial_state = MultiSpecState(
+        version=1,
+        iteration=5,
+        status=Status.CONTINUE,
+        current_index=0,
+        specs=[
+            SpecProgress(path="a.spec.md", done_count=2, last_status="CONTINUE"),
+        ],
+    )
+    write_multi_state(initial_state, initialized_project)
+
+    # Add a new spec
+    result = ensure_state(["a.spec.md", "new.spec.md"], initialized_project)
+
+    # All specs should have reset done_count and last_status
+    assert result.specs[0].done_count == 0
+    assert result.specs[0].last_status is None
+    assert result.specs[1].done_count == 0
+    assert result.specs[1].last_status is None
+
+
+def test_handle_status_updates_last_status() -> None:
+    """handle_status updates last_status after processing a spec."""
+    state = MultiSpecState(
+        version=1,
+        iteration=1,
+        status=Status.CONTINUE,
+        current_index=0,
+        specs=[
+            SpecProgress(path="a.spec.md", done_count=0, last_status=None),
+            SpecProgress(path="b.spec.md", done_count=0, last_status=None),
+        ],
+    )
+
+    # Process first spec with DONE
+    action, exit_code, updated, _ = handle_status(state, 0, Status.DONE, [])
+    assert updated.specs[0].last_status == "DONE"
+    assert updated.specs[1].last_status is None  # Second spec unchanged
+
+    # Process second spec with CONTINUE
+    action, exit_code, updated2, _ = handle_status(updated, 1, Status.CONTINUE, [])
+    assert updated2.specs[0].last_status == "DONE"
+    assert updated2.specs[1].last_status == "CONTINUE"
+
+
+def test_handle_status_preserves_last_status_on_reset() -> None:
+    """When files change, last_status is preserved but done_count resets."""
+    state = MultiSpecState(
+        version=1,
+        iteration=1,
+        status=Status.CONTINUE,
+        current_index=0,
+        specs=[
+            SpecProgress(path="a.spec.md", done_count=2, last_status="DONE"),
+            SpecProgress(path="b.spec.md", done_count=1, last_status="CONTINUE"),
+        ],
+    )
+
+    # Files changed - should reset done_count but preserve last_status
+    action, exit_code, updated, _ = handle_status(state, 0, Status.DONE, ["file.py"])
+
+    # done_count reset for all specs
+    assert all(spec.done_count == 0 for spec in updated.specs)
+    # last_status preserved for other specs, updated for current
+    assert updated.specs[0].last_status == "DONE"  # Current spec updated
+    assert updated.specs[1].last_status == "CONTINUE"  # Other spec preserved
+
+
+def test_reset_clears_spec_states(initialized_project: Path) -> None:
+    """ralph reset clears all spec states including last_status."""
+    import contextlib
+
+    import typer
+
+    from ralph.commands.reset import reset as reset_command
+    from ralph.core.state import ensure_state, read_multi_state, write_multi_state
+
+    # Set up state with specs that have last_status
+    initial_state = MultiSpecState(
+        version=1,
+        iteration=5,
+        status=Status.DONE,
+        current_index=0,
+        specs=[
+            SpecProgress(path="a.spec.md", done_count=3, last_status="DONE"),
+            SpecProgress(path="b.spec.md", done_count=1, last_status="CONTINUE"),
+        ],
+    )
+    write_multi_state(initial_state, initialized_project)
+
+    # Run reset
+    with contextlib.suppress(typer.Exit):
+        reset_command()
+
+    # Check state after reset - specs list should be empty
+    state = read_multi_state(initialized_project)
+    assert state is not None
+    assert state.specs == []
+    assert state.iteration == 0
+
+    # When ensure_state runs again with specs, they'll have no last_status
+    new_state = ensure_state(["a.spec.md", "b.spec.md"], initialized_project)
+    assert all(spec.last_status is None for spec in new_state.specs)
+    assert all(spec.done_count == 0 for spec in new_state.specs)

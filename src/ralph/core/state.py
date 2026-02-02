@@ -49,6 +49,7 @@ class SpecProgress:
 
     path: str
     done_count: int = 0
+    last_status: str | None = None  # Last status signal (e.g., "DONE", "CONTINUE")
 
 
 @dataclass(frozen=True)
@@ -114,7 +115,9 @@ def _spec_progress_from_dict(data: dict[str, object]) -> SpecProgress | None:
     if not isinstance(path_raw, str):
         return None
     done_count = _coerce_int(data.get("done_count", 0), 0)
-    return SpecProgress(path=path_raw, done_count=done_count)
+    last_status_raw = data.get("last_status")
+    last_status = str(last_status_raw) if isinstance(last_status_raw, str) else None
+    return SpecProgress(path=path_raw, done_count=done_count, last_status=last_status)
 
 
 def _state_from_dict(data: dict[str, object]) -> MultiSpecState | None:
@@ -150,12 +153,18 @@ def _state_from_dict(data: dict[str, object]) -> MultiSpecState | None:
 
 
 def _state_to_dict(state: MultiSpecState) -> dict[str, object]:
+    specs_data = []
+    for spec in state.specs:
+        spec_dict: dict[str, object] = {"path": spec.path, "done_count": spec.done_count}
+        if spec.last_status is not None:
+            spec_dict["last_status"] = spec.last_status
+        specs_data.append(spec_dict)
     return {
         "version": state.version,
         "iteration": state.iteration,
         "status": state.status.value,
         "current_index": state.current_index,
-        "specs": [{"path": spec.path, "done_count": spec.done_count} for spec in state.specs],
+        "specs": specs_data,
     }
 
 
@@ -247,12 +256,15 @@ def ensure_state(
         current_path = state.specs[state.current_index].path
 
     new_specs: list[SpecProgress] = []
-    existing_map = {spec.path: spec.done_count for spec in state.specs}
+    existing_map = {spec.path: spec for spec in state.specs}
     for path in spec_paths:
-        done_count = existing_map.get(path, 0)
+        existing = existing_map.get(path)
+        done_count = existing.done_count if existing else 0
+        last_status = existing.last_status if existing else None
         if reset_counts:
             done_count = 0
-        new_specs.append(SpecProgress(path=path, done_count=done_count))
+            last_status = None
+        new_specs.append(SpecProgress(path=path, done_count=done_count, last_status=last_status))
 
     current_index = spec_paths.index(current_path) if current_path in spec_paths else 0
 
@@ -268,6 +280,31 @@ def ensure_state(
         write_multi_state(updated, root)
 
     return updated
+
+
+def spec_priority(spec: SpecProgress) -> int:
+    """Return sort priority for a spec (lower = higher priority).
+
+    Priority order:
+    0 - New specs (no last_status)
+    1 - Non-DONE specs (last_status is not "DONE")
+    2 - DONE specs (last_status is "DONE")
+    """
+    if spec.last_status is None:
+        return 0
+    if spec.last_status != "DONE":
+        return 1
+    return 2
+
+
+def sort_specs_by_priority(specs: list[SpecProgress]) -> list[SpecProgress]:
+    """Sort specs by priority, maintaining stable order within tiers.
+
+    Sorts by: priority first, then original order (for stability).
+    """
+    indexed = list(enumerate(specs))
+    indexed.sort(key=lambda pair: (spec_priority(pair[1]), pair[0]))
+    return [spec for _, spec in indexed]
 
 
 def _migrate_legacy_assets(spec_paths: list[str], root: Path) -> None:

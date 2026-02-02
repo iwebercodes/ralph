@@ -32,6 +32,7 @@ from ralph.core.state import (
     read_guardrails,
     read_handoff,
     read_status,
+    sort_specs_by_priority,
     write_done_count,
     write_handoff,
     write_history,
@@ -353,7 +354,11 @@ def handle_status(
 
     specs = list(state.specs)
     if files_changed:
-        specs = [SpecProgress(path=spec.path, done_count=0) for spec in specs]
+        # Reset done_count but preserve last_status for other specs
+        specs = [
+            SpecProgress(path=spec.path, done_count=0, last_status=spec.last_status)
+            for spec in specs
+        ]
 
     if status == Status.DONE:
         if not files_changed:
@@ -363,13 +368,23 @@ def handle_status(
             specs[spec_index] = SpecProgress(
                 path=specs[spec_index].path,
                 done_count=current_done,
+                last_status=status.value,
             )
-    else:
-        if specs[spec_index].done_count > 0:
+        else:
+            # Files changed - update last_status only
             specs[spec_index] = SpecProgress(
                 path=specs[spec_index].path,
                 done_count=0,
+                last_status=status.value,
             )
+    else:
+        # Non-DONE status - update last_status and reset done_count if needed
+        current_done = 0 if specs[spec_index].done_count > 0 else specs[spec_index].done_count
+        specs[spec_index] = SpecProgress(
+            path=specs[spec_index].path,
+            done_count=current_done,
+            last_status=status.value,
+        )
 
     updated = MultiSpecState(
         version=state.version,
@@ -449,6 +464,18 @@ def run_loop(
 
             state = ensure_state([spec.rel_posix for spec in specs], root)
             spec_map = {spec.rel_posix: spec for spec in specs}
+
+            # Sort specs by priority (new > non-DONE > DONE)
+            sorted_specs = sort_specs_by_priority(state.specs)
+            if sorted_specs != list(state.specs):
+                state = MultiSpecState(
+                    version=state.version,
+                    iteration=state.iteration,
+                    status=state.status,
+                    current_index=0,
+                    specs=sorted_specs,
+                )
+                write_multi_state(state, root)
 
             # Select an agent for this iteration
             agent = agent_pool.select_random()
