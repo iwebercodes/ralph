@@ -99,6 +99,21 @@ class TestConsole:
         output = capsys.readouterr().out
         assert "Agent removed: Codex (rate limit)" in output
 
+    def test_rotation_complete_non_tty_multiple_agent_removals(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Test rotation complete with multiple agent removals for non-TTY output."""
+        console = Console(no_color=True)
+        console.rotation_complete(
+            Status.ROTATE,
+            [],
+            0,
+            agent_removals=(("Claude", "rate limit"), ("Codex", "quota exceeded")),
+        )
+        output = capsys.readouterr().out
+        assert "Agent removed: Claude (rate limit)" in output
+        assert "Agent removed: Codex (quota exceeded)" in output
+
     def test_rotation_complete_no_changes(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Test rotation complete with no changes."""
         console = Console(no_color=True)
@@ -257,6 +272,22 @@ class TestConsoleTTY:
         output = capsys.readouterr().out
         assert "Agent:" in output
         assert "Claude removed (quota exceeded)" in output
+
+    def test_rotation_complete_tty_multiple_agent_removals(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Test rotation complete with multiple agent removals for TTY."""
+        console = Console(no_color=True)
+        console._is_tty = True
+        console.rotation_complete(
+            Status.ROTATE,
+            [],
+            0,
+            agent_removals=(("Claude", "rate limit"), ("Codex", "quota exceeded")),
+        )
+        output = capsys.readouterr().out
+        assert "Claude removed (rate limit)" in output
+        assert "Codex removed (quota exceeded)" in output
 
     def test_rotation_complete_tty_done(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Test rotation complete with DONE status for TTY."""

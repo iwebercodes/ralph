@@ -9,7 +9,7 @@ from enum import Enum
 from pathlib import Path
 from typing import NamedTuple
 
-from ralph.core.specs import is_prompt_path, spec_resource_key
+from ralph.core.specs import is_prompt_path, spec_content_hash, spec_resource_key
 
 RALPH_DIR = ".ralph"
 HANDOFF_FILE = "handoff.md"
@@ -49,6 +49,9 @@ class SpecProgress:
 
     path: str
     done_count: int = 0
+    last_status: str | None = None  # Last status signal (e.g., "DONE", "CONTINUE")
+    last_hash: str | None = None  # Content hash from last processed run
+    modified_files: bool = False  # Whether files were modified when last processed
 
 
 @dataclass(frozen=True)
@@ -114,7 +117,18 @@ def _spec_progress_from_dict(data: dict[str, object]) -> SpecProgress | None:
     if not isinstance(path_raw, str):
         return None
     done_count = _coerce_int(data.get("done_count", 0), 0)
-    return SpecProgress(path=path_raw, done_count=done_count)
+    last_status_raw = data.get("last_status")
+    last_status = str(last_status_raw) if isinstance(last_status_raw, str) else None
+    last_hash_raw = data.get("last_hash")
+    last_hash = str(last_hash_raw) if isinstance(last_hash_raw, str) else None
+    modified_files = bool(data.get("modified_files", False))
+    return SpecProgress(
+        path=path_raw,
+        done_count=done_count,
+        last_status=last_status,
+        last_hash=last_hash,
+        modified_files=modified_files,
+    )
 
 
 def _state_from_dict(data: dict[str, object]) -> MultiSpecState | None:
@@ -150,12 +164,22 @@ def _state_from_dict(data: dict[str, object]) -> MultiSpecState | None:
 
 
 def _state_to_dict(state: MultiSpecState) -> dict[str, object]:
+    specs_data = []
+    for spec in state.specs:
+        spec_dict: dict[str, object] = {"path": spec.path, "done_count": spec.done_count}
+        if spec.last_status is not None:
+            spec_dict["last_status"] = spec.last_status
+        if spec.last_hash is not None:
+            spec_dict["last_hash"] = spec.last_hash
+        if spec.modified_files:
+            spec_dict["modified_files"] = spec.modified_files
+        specs_data.append(spec_dict)
     return {
         "version": state.version,
         "iteration": state.iteration,
         "status": state.status.value,
         "current_index": state.current_index,
-        "specs": [{"path": spec.path, "done_count": spec.done_count} for spec in state.specs],
+        "specs": specs_data,
     }
 
 
@@ -209,6 +233,18 @@ def _ensure_dirs(root: Path) -> None:
     (ralph_dir / HISTORY_DIR).mkdir(parents=True, exist_ok=True)
 
 
+def _ensure_spec_resources(spec_paths: list[str], root: Path) -> None:
+    legacy_handoff = get_handoff_path(None, root)
+    single_prompt = len(spec_paths) == 1 and is_prompt_path(spec_paths[0])
+    skip_prompt_handoff = single_prompt and legacy_handoff.exists()
+    for spec_path in spec_paths:
+        if not (skip_prompt_handoff and is_prompt_path(spec_path)):
+            handoff_path = get_handoff_path(spec_path, root)
+            if not handoff_path.exists():
+                write_file(handoff_path, HANDOFF_TEMPLATE)
+        get_history_dir(root, spec_path).mkdir(parents=True, exist_ok=True)
+
+
 def ensure_state(
     spec_paths: list[str],
     root: Path | None = None,
@@ -224,7 +260,7 @@ def ensure_state(
 
     if state is None:
         legacy = _legacy_state(root)
-        specs = [SpecProgress(path=path, done_count=0) for path in spec_paths]
+        specs = [SpecProgress(path=path, done_count=0, last_hash=None) for path in spec_paths]
         if len(specs) == 1:
             specs[0] = SpecProgress(path=specs[0].path, done_count=legacy.done_count)
         state = MultiSpecState(
@@ -236,6 +272,7 @@ def ensure_state(
         )
         write_multi_state(state, root)
         _migrate_legacy_assets(spec_paths, root)
+        _ensure_spec_resources(spec_paths, root)
         return state
 
     existing_paths = [spec.path for spec in state.specs]
@@ -246,15 +283,49 @@ def ensure_state(
     if state.specs and 0 <= state.current_index < len(state.specs):
         current_path = state.specs[state.current_index].path
 
-    new_specs: list[SpecProgress] = []
-    existing_map = {spec.path: spec.done_count for spec in state.specs}
-    for path in spec_paths:
-        done_count = existing_map.get(path, 0)
-        if reset_counts:
-            done_count = 0
-        new_specs.append(SpecProgress(path=path, done_count=done_count))
+    # Use existing order when spec set hasn't changed, new order when it has
+    path_order = existing_paths if not reset_counts else spec_paths
 
-    current_index = spec_paths.index(current_path) if current_path in spec_paths else 0
+    new_specs: list[SpecProgress] = []
+    existing_map = {spec.path: spec for spec in state.specs}
+    migrated_hashes = False
+    spec_infos: list[tuple[str, int, str | None, str | None, bool, bool]] = []
+    any_spec_modified = False
+    for path in path_order:
+        existing = existing_map.get(path)
+        done_count = existing.done_count if existing else 0
+        last_status = existing.last_status if existing else None
+        last_hash = existing.last_hash if existing else None
+        modified_files = existing.modified_files if existing else False
+        current_hash = spec_content_hash(root / path)
+        spec_modified = (
+            last_hash is not None and current_hash is not None and current_hash != last_hash
+        )
+        if spec_modified:
+            any_spec_modified = True
+        if existing is not None and last_hash is None and current_hash is not None:
+            last_hash = current_hash
+            migrated_hashes = True
+        spec_infos.append((path, done_count, last_status, last_hash, modified_files, spec_modified))
+
+    reset_all_counts = reset_counts or any_spec_modified
+    for path, done_count, last_status, last_hash, modified_files, spec_modified in spec_infos:
+        if reset_all_counts:
+            done_count = 0
+        if reset_counts or spec_modified:
+            last_status = None
+            modified_files = False
+        new_specs.append(
+            SpecProgress(
+                path=path,
+                done_count=done_count,
+                last_status=last_status,
+                last_hash=last_hash,
+                modified_files=modified_files,
+            )
+        )
+
+    current_index = path_order.index(current_path) if current_path in path_order else 0
 
     updated = MultiSpecState(
         version=state.version,
@@ -264,9 +335,10 @@ def ensure_state(
         specs=new_specs,
     )
 
-    if reset_counts or existing_paths != spec_paths or current_index != state.current_index:
+    if reset_counts or current_index != state.current_index or migrated_hashes:
         write_multi_state(updated, root)
 
+    _ensure_spec_resources(spec_paths, root)
     return updated
 
 
@@ -363,8 +435,13 @@ def write_done_count(count: int, root: Path | None = None) -> None:
     state = read_multi_state(root)
     if state and state.specs and 0 <= state.current_index < len(state.specs):
         specs = list(state.specs)
+        current = specs[state.current_index]
         specs[state.current_index] = SpecProgress(
-            path=specs[state.current_index].path, done_count=count
+            path=current.path,
+            done_count=count,
+            last_status=current.last_status,
+            last_hash=current.last_hash,
+            modified_files=current.modified_files,
         )
         updated = MultiSpecState(
             version=state.version,

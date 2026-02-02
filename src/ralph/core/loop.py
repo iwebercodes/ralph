@@ -22,7 +22,13 @@ from ralph.core.run_state import (
     write_run_state,
 )
 from ralph.core.snapshot import compare_snapshots, take_snapshot
-from ralph.core.specs import discover_specs, read_spec_content
+from ralph.core.specs import (
+    Spec,
+    discover_specs,
+    read_spec_content,
+    sort_specs_by_state,
+    spec_content_hash,
+)
 from ralph.core.state import (
     MultiSpecState,
     SpecProgress,
@@ -31,6 +37,7 @@ from ralph.core.state import (
     get_handoff_path,
     read_guardrails,
     read_handoff,
+    read_multi_state,
     read_status,
     write_done_count,
     write_handoff,
@@ -342,6 +349,7 @@ def handle_status(
     spec_index: int,
     status: Status,
     files_changed: list[str],
+    current_hash: str | None,
 ) -> tuple[str, int | None, MultiSpecState, int]:
     """Handle status signal and return (action, exit_code or None, new_state, spec_done_count).
 
@@ -352,8 +360,20 @@ def handle_status(
         return ("exit", 2, state, 0)
 
     specs = list(state.specs)
+    has_file_changes = bool(files_changed)
+
     if files_changed:
-        specs = [SpecProgress(path=spec.path, done_count=0) for spec in specs]
+        # Reset done_count but preserve last_status and modified_files for other specs
+        specs = [
+            SpecProgress(
+                path=spec.path,
+                done_count=0,
+                last_status=spec.last_status,
+                last_hash=spec.last_hash,
+                modified_files=spec.modified_files,
+            )
+            for spec in specs
+        ]
 
     if status == Status.DONE:
         if not files_changed:
@@ -363,13 +383,29 @@ def handle_status(
             specs[spec_index] = SpecProgress(
                 path=specs[spec_index].path,
                 done_count=current_done,
+                last_status=status.value,
+                last_hash=current_hash,
+                modified_files=has_file_changes,
             )
-    else:
-        if specs[spec_index].done_count > 0:
+        else:
+            # Files changed - update last_status and modified_files
             specs[spec_index] = SpecProgress(
                 path=specs[spec_index].path,
                 done_count=0,
+                last_status=status.value,
+                last_hash=current_hash,
+                modified_files=has_file_changes,
             )
+    else:
+        # Non-DONE status - update last_status and reset done_count if needed
+        current_done = 0 if specs[spec_index].done_count > 0 else specs[spec_index].done_count
+        specs[spec_index] = SpecProgress(
+            path=specs[spec_index].path,
+            done_count=current_done,
+            last_status=status.value,
+            last_hash=current_hash,
+            modified_files=has_file_changes,
+        )
 
     updated = MultiSpecState(
         version=state.version,
@@ -387,6 +423,28 @@ def handle_status(
         return ("exit", 0, updated, spec_done_count)
 
     return ("continue", None, updated, spec_done_count)
+
+
+def _get_spec_states(
+    state: MultiSpecState | None,
+) -> dict[str, tuple[str | None, str | None, bool]]:
+    """Extract spec states from MultiSpecState for sorting."""
+    if state is None:
+        return {}
+    return {
+        spec.path: (spec.last_status, spec.last_hash, spec.modified_files) for spec in state.specs
+    }
+
+
+def _sort_specs_for_run(specs: list[Spec], root: Path) -> list[Spec]:
+    """Sort specs by priority for this run.
+
+    New specs and modified specs come first, then non-DONE, then DONE.
+    Within DONE specs, those that modified files come before those that didn't.
+    """
+    existing_state = read_multi_state(root)
+    spec_states = _get_spec_states(existing_state)
+    return sort_specs_by_state(specs, spec_states, root)
 
 
 def run_loop(
@@ -422,7 +480,25 @@ def run_loop(
     if not specs:
         return LoopResult(1, "No spec files found", 0)
 
-    state = ensure_state([spec.rel_posix for spec in specs], root)
+    # Sort specs by priority for this run and persist the sorted order
+    specs = _sort_specs_for_run(specs, root)
+    sorted_paths = [spec.rel_posix for spec in specs]
+    state = ensure_state(sorted_paths, root)
+
+    # Force-write the sorted order if it differs from what ensure_state returned
+    # This ensures the priority-sorted order is persisted for this run
+    if [sp.path for sp in state.specs] != sorted_paths:
+        state = MultiSpecState(
+            version=state.version,
+            iteration=state.iteration,
+            status=state.status,
+            current_index=0,  # Reset to start of sorted list
+            specs=[
+                next((sp for sp in state.specs if sp.path == path), SpecProgress(path=path))
+                for path in sorted_paths
+            ],
+        )
+        write_multi_state(state, root)
     iteration = state.iteration
     iterations_run = 0
     started_at = now_iso()
@@ -513,11 +589,13 @@ def run_loop(
                 agent_pool.remove(agent)
                 agent_exhausted = True
 
+            current_hash = spec_content_hash(spec.path)
             action, exit_code, state, spec_done_count = handle_status(
                 state,
                 state.current_index,
                 result.status,
                 result.files_changed,
+                current_hash,
             )
             write_multi_state(state, root)
             write_done_count(spec_done_count, root)

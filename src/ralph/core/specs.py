@@ -62,11 +62,82 @@ def spec_sort_key(spec: Spec) -> tuple[int, str]:
     return (1, spec.rel_posix)
 
 
+def spec_priority_key(
+    spec_path: str,
+    last_status: str | None,
+    last_hash: str | None,
+    current_hash: str | None,
+    modified_files: bool = False,
+) -> tuple[int, str]:
+    """Return sort key for smart spec sorting.
+
+    Priority tiers (lower is higher priority):
+    0 - New specs (no last_status)
+    1 - Modified specs (content hash changed)
+    2 - Non-DONE last_status (CONTINUE, ROTATE, STUCK, etc.)
+    3 - DONE last_status that modified files (more likely to produce changes again)
+    4 - DONE last_status that didn't modify files (least likely to produce changes)
+
+    Within each tier, maintain alphabetical order for stability.
+    """
+    is_new = last_status is None
+    is_modified = last_hash is not None and current_hash is not None and last_hash != current_hash
+
+    if is_new:
+        return (0, spec_path)
+    elif is_modified:
+        return (1, spec_path)
+    elif last_status != "DONE":
+        return (2, spec_path)
+    elif modified_files:
+        return (3, spec_path)
+    else:
+        return (4, spec_path)
+
+
+def sort_specs_by_state(
+    specs: list[Spec],
+    spec_states: dict[str, tuple[str | None, str | None, bool]],
+    root: Path,
+) -> list[Spec]:
+    """Sort specs by priority based on their saved state.
+
+    Args:
+        specs: List of discovered specs (already sorted alphabetically)
+        spec_states: Map of spec path -> (last_status, last_hash, modified_files)
+        root: Project root for computing current hashes
+
+    Returns:
+        Specs sorted by priority: new first, modified second, non-DONE third,
+        DONE with file changes fourth, DONE without file changes last.
+        Within each tier, alphabetical order is maintained.
+    """
+
+    def sort_key(spec: Spec) -> tuple[int, str]:
+        state = spec_states.get(spec.rel_posix, (None, None, False))
+        last_status, last_hash, modified_files = state
+        current_hash = spec_content_hash(spec.path)
+        return spec_priority_key(
+            spec.rel_posix, last_status, last_hash, current_hash, modified_files
+        )
+
+    return sorted(specs, key=sort_key)
+
+
 def spec_hash(rel_posix: str) -> str:
     """Short hash for a spec path using forward slashes."""
     normalized = PurePosixPath(rel_posix.replace("\\", "/")).as_posix()
     digest = hashlib.sha1(normalized.encode("utf-8")).hexdigest()
     return digest[:6]
+
+
+def spec_content_hash(path: Path) -> str | None:
+    """Return a sha1 hash of the spec content, or None if missing."""
+    try:
+        content = path.read_bytes()
+    except FileNotFoundError:
+        return None
+    return hashlib.sha1(content).hexdigest()
 
 
 def is_prompt_path(rel_posix: str) -> bool:

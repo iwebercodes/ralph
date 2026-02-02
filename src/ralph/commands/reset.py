@@ -12,10 +12,12 @@ from ralph.core.state import (
     HANDOFF_DIR,
     HANDOFF_TEMPLATE,
     MultiSpecState,
+    SpecProgress,
     Status,
     get_history_dir,
     get_ralph_dir,
     is_initialized,
+    read_multi_state,
     write_done_count,
     write_guardrails,
     write_handoff,
@@ -40,6 +42,21 @@ def reset(
 
     ralph_dir = get_ralph_dir(root)
 
+    # Preserve spec priority state (last_status, last_hash, modified_files) across reset
+    existing_state = read_multi_state(root)
+    preserved_specs: list[SpecProgress] = []
+    if existing_state:
+        for spec in existing_state.specs:
+            preserved_specs.append(
+                SpecProgress(
+                    path=spec.path,
+                    done_count=0,  # Reset done_count
+                    last_status=spec.last_status,  # Preserve for priority sorting
+                    last_hash=spec.last_hash,  # Preserve for modification detection
+                    modified_files=spec.modified_files,  # Preserve for priority sorting
+                )
+            )
+
     # Reset state files
     write_iteration(0, root)
     write_done_count(0, root)
@@ -51,7 +68,7 @@ def reset(
             iteration=0,
             status=Status.IDLE,
             current_index=0,
-            specs=[],
+            specs=preserved_specs,
         ),
         root,
     )

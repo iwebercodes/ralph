@@ -120,7 +120,7 @@ class TestHandleStatus:
     def test_stuck_exits_immediately(self, initialized_project: Path) -> None:
         """Test STUCK status exits with code 2."""
         state = self._state([0])
-        action, exit_code, _, done_count = handle_status(state, 0, Status.STUCK, [])
+        action, exit_code, _, done_count = handle_status(state, 0, Status.STUCK, [], "hash-a")
         assert action == "exit"
         assert exit_code == 2
         assert done_count == 0
@@ -128,7 +128,7 @@ class TestHandleStatus:
     def test_done_without_changes_increments(self, initialized_project: Path) -> None:
         """Test DONE without changes increments done_count."""
         state = self._state([0])
-        action, exit_code, _, done_count = handle_status(state, 0, Status.DONE, [])
+        action, exit_code, _, done_count = handle_status(state, 0, Status.DONE, [], "hash-a")
         assert action == "continue"
         assert exit_code is None
         assert done_count == 1
@@ -136,7 +136,9 @@ class TestHandleStatus:
     def test_done_with_changes_resets(self, initialized_project: Path) -> None:
         """Test DONE with changes resets done_count."""
         state = self._state([2, 1])
-        action, exit_code, new_state, done_count = handle_status(state, 0, Status.DONE, ["file.py"])
+        action, exit_code, new_state, done_count = handle_status(
+            state, 0, Status.DONE, ["file.py"], "hash-a"
+        )
         assert action == "continue"
         assert exit_code is None
         assert done_count == 0
@@ -145,7 +147,7 @@ class TestHandleStatus:
     def test_done_three_times_exits(self, initialized_project: Path) -> None:
         """Test DONE 3 times exits successfully."""
         state = self._state([2, 3])
-        action, exit_code, _, done_count = handle_status(state, 0, Status.DONE, [])
+        action, exit_code, _, done_count = handle_status(state, 0, Status.DONE, [], "hash-a")
         assert action == "exit"
         assert exit_code == 0
         assert done_count == 3
@@ -153,7 +155,9 @@ class TestHandleStatus:
     def test_rotate_resets_done_count(self, initialized_project: Path) -> None:
         """Test ROTATE resets done_count."""
         state = self._state([1])
-        action, exit_code, _, done_count = handle_status(state, 0, Status.ROTATE, ["file.py"])
+        action, exit_code, _, done_count = handle_status(
+            state, 0, Status.ROTATE, ["file.py"], "hash-a"
+        )
         assert action == "continue"
         assert exit_code is None
         assert done_count == 0
@@ -161,7 +165,7 @@ class TestHandleStatus:
     def test_continue_resets_done_count(self, initialized_project: Path) -> None:
         """Test CONTINUE resets done_count if it was > 0."""
         state = self._state([1])
-        action, exit_code, _, done_count = handle_status(state, 0, Status.CONTINUE, [])
+        action, exit_code, _, done_count = handle_status(state, 0, Status.CONTINUE, [], "hash-a")
         assert action == "continue"
         assert exit_code is None
         assert done_count == 0
@@ -169,7 +173,7 @@ class TestHandleStatus:
     def test_continue_with_zero_done_count(self, initialized_project: Path) -> None:
         """Test CONTINUE with zero done_count stays at zero."""
         state = self._state([0])
-        action, exit_code, _, done_count = handle_status(state, 0, Status.CONTINUE, [])
+        action, exit_code, _, done_count = handle_status(state, 0, Status.CONTINUE, [], "hash-a")
         assert action == "continue"
         assert exit_code is None
         assert done_count == 0
