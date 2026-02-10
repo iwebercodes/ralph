@@ -1,5 +1,41 @@
 # Changelog
 
+## v0.4.0 - Multi-Spec Workflow
+
+Work on multiple specifications simultaneously without regressions, with intelligent prioritization.
+
+### Added
+
+- **Multi-spec mode**: Ralph can now handle multiple specification files at once, ensuring all constraints remain satisfied:
+  - Discovers specs from `PROMPT.md`, `.ralph/specs/*.spec.md`, and `specs/*.spec.md`
+  - Round-robin rotation through all specs with independent verification tracking
+  - Resets all counters when any file changes, preventing regressions
+  - Each spec maintains its own handoff and history for better context isolation
+  - Shared guardrails enable knowledge transfer between specs
+
+- **Smart spec prioritization**: Specs are now intelligently sorted to process the most relevant ones first:
+  - New specs (never processed) get highest priority
+  - Modified specs come next
+  - Active specs (non-DONE status) before completed ones
+  - DONE specs that modified files before those that didn't
+  - Significantly improves performance with many specs
+
+- **Agent crash recovery**: Ralph now gracefully handles agent crashes and hangs:
+  - Detects crashes via exit codes, empty output, or error patterns
+  - Real-time stderr monitoring catches hung processes
+  - Automatically continues with next rotation instead of stopping
+  - Crash details preserved in handoff for context
+
+- **`ralph --version` command**: Check installed version with `ralph --version` or `-V`
+
+- **Agent removal notifications**: Visual feedback when agents are removed from the pool due to exhaustion, showing which agent and why
+
+- **Comprehensive `.ralphignore`**: Expanded ignore patterns for Python development files prevent false rotation resets
+
+### Fixed
+
+- **Codex exhaustion detection**: Fixed false positives where Codex was incorrectly removed from pool when stderr contained informational mentions of "token limit". Now requires both non-zero exit code and specific error patterns.
+
 ## v0.3.0 - Session Monitoring
 
 Monitor running Ralph sessions from another terminal with `ralph inspect`.
