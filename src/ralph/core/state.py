@@ -277,20 +277,20 @@ def ensure_state(
 
     existing_paths = [spec.path for spec in state.specs]
     existing_set = set(existing_paths)
-    reset_counts = spec_set != existing_set
+    spec_set_changed = spec_set != existing_set
 
     current_path = None
     if state.specs and 0 <= state.current_index < len(state.specs):
         current_path = state.specs[state.current_index].path
 
-    # Use existing order when spec set hasn't changed, new order when it has
-    path_order = existing_paths if not reset_counts else spec_paths
+    # Preserve existing order for existing specs; append new specs in discovery order.
+    path_order = [path for path in existing_paths if path in spec_set]
+    path_order.extend(path for path in spec_paths if path not in existing_set)
 
     new_specs: list[SpecProgress] = []
     existing_map = {spec.path: spec for spec in state.specs}
     migrated_hashes = False
     spec_infos: list[tuple[str, int, str | None, str | None, bool, bool]] = []
-    any_spec_modified = False
     for path in path_order:
         existing = existing_map.get(path)
         done_count = existing.done_count if existing else 0
@@ -301,18 +301,15 @@ def ensure_state(
         spec_modified = (
             last_hash is not None and current_hash is not None and current_hash != last_hash
         )
-        if spec_modified:
-            any_spec_modified = True
         if existing is not None and last_hash is None and current_hash is not None:
             last_hash = current_hash
             migrated_hashes = True
         spec_infos.append((path, done_count, last_status, last_hash, modified_files, spec_modified))
 
-    reset_all_counts = reset_counts or any_spec_modified
     for path, done_count, last_status, last_hash, modified_files, spec_modified in spec_infos:
-        if reset_all_counts:
+        if spec_modified:
             done_count = 0
-        if reset_counts or spec_modified:
+        if spec_modified:
             last_status = None
             modified_files = False
         new_specs.append(
@@ -335,7 +332,7 @@ def ensure_state(
         specs=new_specs,
     )
 
-    if reset_counts or current_index != state.current_index or migrated_hashes:
+    if spec_set_changed or current_index != state.current_index or migrated_hashes:
         write_multi_state(updated, root)
 
     _ensure_spec_resources(spec_paths, root)

@@ -18,6 +18,10 @@ Any mention of "token limit" in this output would incorrectly trigger removal.
 
 Replace broad patterns with specific ones that only match actual exhaustion errors, and add exit code checking for defense in depth.
 
+## References
+
+- `specs/references/codex-exhaustion-detection.md`
+
 ## Actual Error Format
 
 When Codex hits its usage limit, this is the actual output:
@@ -79,6 +83,13 @@ ERROR: You've hit your usage limit. Upgrade to Pro (https://openai.com/chatgpt/p
 - [ ] Only consider exhaustion if `exit_code != 0`
 - [ ] Successful runs (exit_code == 0) never trigger exhaustion, regardless of stderr content
 
+### Detection Scope (Ignore Echoed User Block)
+
+- [ ] Exhaustion pattern recognition must NOT scan the echoed `user` block in stderr
+- [ ] Pattern recognition must run only on the runtime/error portion after the `user` block
+- [ ] In practice, detect from the first runtime error anchor (e.g., `codex_api::endpoint::responses`) onward
+- [ ] If no runtime error anchor exists, do not classify as exhaustion from echoed prompt text alone
+
 ### Extraction of Reset Information
 
 - [ ] Extract `resets_in_seconds` from JSON error when available
@@ -96,3 +107,4 @@ ERROR: You've hit your usage limit. Upgrade to Pro (https://openai.com/chatgpt/p
 2. **False positive prevention**: Stderr contains "token limit" discussion with exit code 0 → agent NOT removed
 3. **Pattern matching**: Each specific pattern correctly identifies exhaustion
 4. **Reset time extraction**: JSON error with `resets_in_seconds` shows formatted time in output
+5. **User-block immunity**: Stderr echoed prompt contains exhaustion keywords before runtime error block → agent NOT removed

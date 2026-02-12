@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import NamedTuple, Protocol, TextIO
 
@@ -44,8 +45,7 @@ class Agent(Protocol):
             prompt: The prompt to send to the agent
             timeout: Timeout in seconds (default 3 hours), None for no timeout
             output_file: Optional file to stream output to in real time
-            crash_patterns: Regex patterns to monitor in stderr. If a pattern
-                matches, the process is killed immediately.
+            crash_patterns: Deprecated. Kept for backward-compatible call sites.
 
         Returns:
             AgentResult with output, exit code, and any error message
@@ -70,15 +70,6 @@ class Agent(Protocol):
 
 class ClaudeAgent:
     """Agent implementation using Claude CLI."""
-
-    _EXHAUSTION_PATTERNS = [
-        r"rate.?limit",
-        r"quota.?exceeded",
-        r"token.?limit",
-        r"usage.?limit",
-        r"rate_limit_exceeded",
-        r"daily.?limit",
-    ]
 
     @property
     def name(self) -> str:
@@ -123,12 +114,25 @@ class ClaudeAgent:
         )
 
     def is_exhausted(self, result: AgentResult) -> bool:
-        """Check if Claude is exhausted based on error output."""
-        return _extract_exhaustion_reason(self._EXHAUSTION_PATTERNS, result.error) is not None
+        """Check if Claude is exhausted based on stdout signature output."""
+        if result.exit_code == 0:
+            return False
+        return _claude_extract_exhaustion_info(result.output) is not None
 
     def exhaustion_reason(self, result: AgentResult) -> str | None:
-        """Return the matched exhaustion reason, if any."""
-        return _extract_exhaustion_reason(self._EXHAUSTION_PATTERNS, result.error)
+        """Return a human-readable Claude exhaustion reason with reset time if available."""
+        if result.exit_code == 0:
+            return None
+        info = _claude_extract_exhaustion_info(result.output)
+        if info is None:
+            return None
+        _, reset_epoch = info
+        if reset_epoch is None:
+            return "usage limit reached"
+        reset_at = datetime.fromtimestamp(reset_epoch, tz=timezone.utc).strftime(
+            "%Y-%m-%d %H:%M UTC"
+        )
+        return f"usage limit reached (resets at {reset_at})"
 
 
 class CodexAgent:
@@ -234,6 +238,10 @@ def _codex_extract_exhaustion_info(error: str | None) -> tuple[str, int | None] 
     if not error:
         return None
 
+    runtime_error = _codex_runtime_error_text(error)
+    if runtime_error is None:
+        return None
+
     # Check for specific exhaustion patterns
     patterns = [
         (r"usage_limit_reached", "usage limit reached"),
@@ -243,7 +251,7 @@ def _codex_extract_exhaustion_info(error: str | None) -> tuple[str, int | None] 
 
     matched_reason = None
     for pattern, reason in patterns:
-        if re.search(pattern, error):
+        if re.search(pattern, runtime_error):
             matched_reason = reason
             break
 
@@ -252,11 +260,61 @@ def _codex_extract_exhaustion_info(error: str | None) -> tuple[str, int | None] 
 
     # Try to extract reset time from JSON error (handles both escaped and unescaped quotes)
     reset_seconds = None
-    reset_match = re.search(r'(?:\\"|")?resets_in_seconds(?:\\"|")?\s*:\s*(\d+)', error)
+    reset_match = re.search(
+        r'(?:\\"|")?resets_in_seconds(?:\\"|")?\s*:\s*(\d+)',
+        runtime_error,
+    )
     if reset_match:
         reset_seconds = int(reset_match.group(1))
 
     return (matched_reason, reset_seconds)
+
+
+def _codex_runtime_error_text(error: str) -> str | None:
+    """Return the runtime/error section of Codex stderr.
+
+    Codex echoes the user prompt to stderr before runtime errors. To avoid
+    false positives from prompt text, exhaustion matching starts from the first
+    runtime error anchor.
+    """
+    search_start = 0
+    user_block = re.search(r"^user\s*$", error, re.MULTILINE)
+    if user_block:
+        mcp_start = re.search(r"^mcp startup:.*$", error[user_block.end() :], re.MULTILINE)
+        if mcp_start:
+            mcp_line_start = user_block.end() + mcp_start.start()
+            mcp_line_end = error.find("\n", mcp_line_start)
+            search_start = len(error) if mcp_line_end == -1 else mcp_line_end + 1
+
+    anchor_patterns = [
+        r"codex_api::endpoint::responses",
+        r"^\d{4}-\d{2}-\d{2}T[^\n]*\bERROR\b",
+        r"^ERROR:",
+    ]
+    start_index: int | None = None
+    search_text = error[search_start:]
+    for pattern in anchor_patterns:
+        match = re.search(pattern, search_text, re.MULTILINE)
+        if match:
+            absolute_index = search_start + match.start()
+            if start_index is None or absolute_index < start_index:
+                start_index = absolute_index
+    if start_index is None:
+        return None
+    return error[start_index:]
+
+
+def _claude_extract_exhaustion_info(output: str | None) -> tuple[str, int | None] | None:
+    """Extract exhaustion signature and reset epoch from Claude stdout output."""
+    if not output:
+        return None
+
+    match = re.search(r"^\s*Claude AI usage limit reached\|(\d+)\s*$", output, re.MULTILINE)
+    if not match:
+        return None
+
+    reset_epoch = int(match.group(1))
+    return ("usage limit reached", reset_epoch)
 
 
 def _format_duration(seconds: int) -> str:
@@ -300,7 +358,7 @@ def _invoke_command(
                 error=result.stderr or None,
             )
 
-        return _invoke_with_streaming(cmd, timeout, output_file, crash_patterns)
+        return _invoke_with_streaming(cmd, timeout, output_file)
     except subprocess.TimeoutExpired:
         return AgentResult(
             output="",
@@ -319,18 +377,12 @@ def _invoke_with_streaming(
     cmd: list[str],
     timeout: int | None,
     output_file: Path,
-    crash_patterns: list[str] | None = None,
 ) -> AgentResult:
-    """Invoke a command while streaming output line-by-line to a file.
-
-    If crash_patterns is provided, stderr is monitored in real-time. When a
-    crash pattern is detected, the process is killed immediately.
-    """
+    """Invoke a command while streaming output line-by-line to a file."""
     output_file.parent.mkdir(parents=True, exist_ok=True)
     stdout_lines: list[str] = []
     stderr_lines: list[str] = []
     lock = threading.Lock()
-    crash_detected = threading.Event()
 
     def _read_stdout(stream: TextIO) -> None:
         while True:
@@ -351,11 +403,6 @@ def _invoke_with_streaming(
             with lock:
                 log_file.write(line)
                 log_file.flush()
-            if crash_patterns:
-                for pattern in crash_patterns:
-                    if re.search(pattern, line, re.IGNORECASE):
-                        crash_detected.set()
-                        return
 
     with output_file.open("a", encoding="utf-8") as log_file:
         process = subprocess.Popen(
@@ -377,14 +424,10 @@ def _invoke_with_streaming(
         stderr_thread.start()
 
         try:
-            # Poll for process completion or crash detection
+            # Poll for process completion
             elapsed = 0.0
             poll_interval = 0.1
             while True:
-                if crash_detected.is_set():
-                    process.kill()
-                    process.wait()
-                    break
                 try:
                     process.wait(timeout=poll_interval)
                     break  # Process finished normally

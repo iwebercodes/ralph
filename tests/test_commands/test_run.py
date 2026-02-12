@@ -234,14 +234,13 @@ def test_run_done_with_changes_resets(
         {"status": "DONE", "output": "Done but changed", "changes": ["file.py"]},
         {"status": "DONE", "output": "Really done", "changes": []},
         {"status": "DONE", "output": "Review 1", "changes": []},
-        {"status": "DONE", "output": "Review 2", "changes": []},
     ]
 
     result = _run_with_mock_agent(project_with_prompt, responses)
 
     assert result.exit_code == 0
-    # Took 4 iterations: 1 DONE with changes, then 3 consecutive DONEs
-    assert read_iteration(project_with_prompt) == 4
+    # Took 3 iterations: 1 DONE with changes (1/3), then 2 consecutive DONEs (2/3, 3/3)
+    assert read_iteration(project_with_prompt) == 3
 
 
 def test_run_creates_history(

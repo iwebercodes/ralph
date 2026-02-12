@@ -68,7 +68,8 @@ def spec_priority_key(
     last_hash: str | None,
     current_hash: str | None,
     modified_files: bool = False,
-) -> tuple[int, str]:
+    done_count: int = 0,
+) -> tuple[int, int, str]:
     """Return sort key for smart spec sorting.
 
     Priority tiers (lower is higher priority):
@@ -78,47 +79,50 @@ def spec_priority_key(
     3 - DONE last_status that modified files (more likely to produce changes again)
     4 - DONE last_status that didn't modify files (least likely to produce changes)
 
-    Within each tier, maintain alphabetical order for stability.
+    Within tier 4, prefer lower verification count first (e.g., 1/3 before 2/3).
+    Within each tier (or same verification count in tier 4), maintain alphabetical order.
     """
     is_new = last_status is None
     is_modified = last_hash is not None and current_hash is not None and last_hash != current_hash
 
     if is_new:
-        return (0, spec_path)
+        return (0, 0, spec_path)
     elif is_modified:
-        return (1, spec_path)
+        return (1, 0, spec_path)
     elif last_status != "DONE":
-        return (2, spec_path)
+        return (2, 0, spec_path)
     elif modified_files:
-        return (3, spec_path)
+        return (3, 0, spec_path)
     else:
-        return (4, spec_path)
+        # Tier 4: DONE without file changes - prefer lower done_count
+        return (4, done_count, spec_path)
 
 
 def sort_specs_by_state(
     specs: list[Spec],
-    spec_states: dict[str, tuple[str | None, str | None, bool]],
+    spec_states: dict[str, tuple[str | None, str | None, bool, int]],
     root: Path,
 ) -> list[Spec]:
     """Sort specs by priority based on their saved state.
 
     Args:
         specs: List of discovered specs (already sorted alphabetically)
-        spec_states: Map of spec path -> (last_status, last_hash, modified_files)
+        spec_states: Map of spec path -> (last_status, last_hash, modified_files, done_count)
         root: Project root for computing current hashes
 
     Returns:
         Specs sorted by priority: new first, modified second, non-DONE third,
         DONE with file changes fourth, DONE without file changes last.
-        Within each tier, alphabetical order is maintained.
+        Within DONE without file changes (tier 4), lower verification count comes first.
+        Within each tier (or same verification count), alphabetical order is maintained.
     """
 
-    def sort_key(spec: Spec) -> tuple[int, str]:
-        state = spec_states.get(spec.rel_posix, (None, None, False))
-        last_status, last_hash, modified_files = state
+    def sort_key(spec: Spec) -> tuple[int, int, str]:
+        state = spec_states.get(spec.rel_posix, (None, None, False, 0))
+        last_status, last_hash, modified_files, done_count = state
         current_hash = spec_content_hash(spec.path)
         return spec_priority_key(
-            spec.rel_posix, last_status, last_hash, current_hash, modified_files
+            spec.rel_posix, last_status, last_hash, current_hash, modified_files, done_count
         )
 
     return sorted(specs, key=sort_key)

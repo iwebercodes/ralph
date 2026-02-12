@@ -114,6 +114,20 @@ class TestConsole:
         assert "Agent removed: Claude (rate limit)" in output
         assert "Agent removed: Codex (quota exceeded)" in output
 
+    def test_rotation_complete_non_tty_codex_reset_time_reason(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Test non-TTY output preserves Codex reset-time exhaustion details."""
+        console = Console(no_color=True)
+        console.rotation_complete(
+            Status.ROTATE,
+            [],
+            0,
+            agent_removals=(("Codex", "usage limit reached (resets in 33 minutes)"),),
+        )
+        output = capsys.readouterr().out
+        assert "Agent removed: Codex (usage limit reached (resets in 33 minutes))" in output
+
     def test_rotation_complete_no_changes(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Test rotation complete with no changes."""
         console = Console(no_color=True)
@@ -288,6 +302,21 @@ class TestConsoleTTY:
         output = capsys.readouterr().out
         assert "Claude removed (rate limit)" in output
         assert "Codex removed (quota exceeded)" in output
+
+    def test_rotation_complete_tty_codex_reset_time_reason(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Test TTY output preserves Codex reset-time exhaustion details."""
+        console = Console(no_color=True)
+        console._is_tty = True
+        console.rotation_complete(
+            Status.ROTATE,
+            [],
+            0,
+            agent_removals=(("Codex", "usage limit reached (resets in 33 minutes)"),),
+        )
+        output = capsys.readouterr().out
+        assert "Codex removed (usage limit reached (resets in 33 minutes))" in output
 
     def test_rotation_complete_tty_done(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Test rotation complete with DONE status for TTY."""

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import re
 import subprocess
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -162,13 +161,6 @@ def format_log_entry(
     return "\n".join(lines)
 
 
-_CRASH_ERROR_PATTERNS = [
-    r"no messages returned",
-    r"econnreset",
-    r"etimedout",
-]
-
-
 def _first_non_empty_line(text: str) -> str | None:
     for line in text.splitlines():
         stripped = line.strip()
@@ -181,21 +173,15 @@ def _detect_agent_crash(result: AgentResult, exhausted: bool) -> tuple[str, str 
     if exhausted:
         return None
 
+    failed = result.exit_code != 0
     output_empty = not result.output.strip()
     error_text = result.error or ""
-    matched_pattern = None
-    if error_text:
-        for pattern in _CRASH_ERROR_PATTERNS:
-            if re.search(pattern, error_text, re.IGNORECASE):
-                matched_pattern = pattern
-                break
 
+    # Empty stdout is treated as a crash signal, even with exit code 0.
     if output_empty:
         summary = "empty output from agent"
-    elif result.exit_code != 0:
+    elif failed:
         summary = f"non-zero exit code ({result.exit_code})"
-    elif matched_pattern:
-        summary = f"stderr matched {matched_pattern}"
     else:
         return None
 
@@ -289,7 +275,6 @@ def run_iteration(
         prompt,
         timeout=timeout,
         output_file=output_file,
-        crash_patterns=_CRASH_ERROR_PATTERNS,
     )
 
     # Parse status
@@ -356,27 +341,42 @@ def handle_status(
     action: "continue", "exit"
     exit_code: None if continuing, otherwise the exit code
     """
-    if status == Status.STUCK:
-        return ("exit", 2, state, 0)
-
     specs = list(state.specs)
     has_file_changes = bool(files_changed)
 
-    if files_changed:
-        # Reset done_count but preserve last_status and modified_files for other specs
-        specs = [
-            SpecProgress(
-                path=spec.path,
-                done_count=0,
-                last_status=spec.last_status,
-                last_hash=spec.last_hash,
-                modified_files=spec.modified_files,
-            )
-            for spec in specs
-        ]
+    # Early check for invalid spec_index
+    if not specs or spec_index < 0 or spec_index >= len(specs):
+        # Return early with safe defaults
+        updated = MultiSpecState(
+            version=state.version,
+            iteration=state.iteration,
+            status=status,
+            current_index=state.current_index,
+            specs=specs,
+        )
+        if status == Status.STUCK:
+            return ("exit", 2, updated, 0)
+        return ("continue", None, updated, 0)
 
+    if files_changed:
+        # Multi-spec propagation rule:
+        # only downgrade OTHER fully verified specs from 3/3 to 2/3.
+        for idx, spec in enumerate(specs):
+            if idx == spec_index:
+                continue
+            if spec.done_count >= 3:
+                specs[idx] = SpecProgress(
+                    path=spec.path,
+                    done_count=2,
+                    last_status=spec.last_status,
+                    last_hash=spec.last_hash,
+                    modified_files=spec.modified_files,
+                )
+
+    # Now handle the current spec based on its status
     if status == Status.DONE:
         if not files_changed:
+            # Increment counter
             current_done = specs[spec_index].done_count + 1
             if current_done > 3:
                 current_done = 3
@@ -388,7 +388,18 @@ def handle_status(
                 modified_files=has_file_changes,
             )
         else:
-            # Files changed - update last_status and modified_files
+            # Files changed and status is DONE - reset to 1/3
+            specs[spec_index] = SpecProgress(
+                path=specs[spec_index].path,
+                done_count=1,
+                last_status=status.value,
+                last_hash=current_hash,
+                modified_files=has_file_changes,
+            )
+    else:
+        # Non-DONE status
+        if files_changed:
+            # Files changed and status is non-DONE - reset to 0/3
             specs[spec_index] = SpecProgress(
                 path=specs[spec_index].path,
                 done_count=0,
@@ -396,16 +407,15 @@ def handle_status(
                 last_hash=current_hash,
                 modified_files=has_file_changes,
             )
-    else:
-        # Non-DONE status - update last_status and reset done_count if needed
-        current_done = 0 if specs[spec_index].done_count > 0 else specs[spec_index].done_count
-        specs[spec_index] = SpecProgress(
-            path=specs[spec_index].path,
-            done_count=current_done,
-            last_status=status.value,
-            last_hash=current_hash,
-            modified_files=has_file_changes,
-        )
+        else:
+            # No files changed and status is non-DONE - keep counter unchanged
+            specs[spec_index] = SpecProgress(
+                path=specs[spec_index].path,
+                done_count=specs[spec_index].done_count,
+                last_status=status.value,
+                last_hash=current_hash,
+                modified_files=has_file_changes,
+            )
 
     updated = MultiSpecState(
         version=state.version,
@@ -419,6 +429,9 @@ def handle_status(
     if specs and 0 <= spec_index < len(specs):
         spec_done_count = specs[spec_index].done_count
 
+    if status == Status.STUCK:
+        return ("exit", 2, updated, spec_done_count)
+
     if specs and all(spec.done_count >= 3 for spec in specs):
         return ("exit", 0, updated, spec_done_count)
 
@@ -427,12 +440,13 @@ def handle_status(
 
 def _get_spec_states(
     state: MultiSpecState | None,
-) -> dict[str, tuple[str | None, str | None, bool]]:
+) -> dict[str, tuple[str | None, str | None, bool, int]]:
     """Extract spec states from MultiSpecState for sorting."""
     if state is None:
         return {}
     return {
-        spec.path: (spec.last_status, spec.last_hash, spec.modified_files) for spec in state.specs
+        spec.path: (spec.last_status, spec.last_hash, spec.modified_files, spec.done_count)
+        for spec in state.specs
     }
 
 
@@ -480,23 +494,35 @@ def run_loop(
     if not specs:
         return LoopResult(1, "No spec files found", 0)
 
-    # Sort specs by priority for this run and persist the sorted order
-    specs = _sort_specs_for_run(specs, root)
-    sorted_paths = [spec.rel_posix for spec in specs]
-    state = ensure_state(sorted_paths, root)
+    # Ensure state is up to date with discovered specs
+    state = ensure_state([spec.rel_posix for spec in specs], root)
 
-    # Force-write the sorted order if it differs from what ensure_state returned
-    # This ensures the priority-sorted order is persisted for this run
-    if [sp.path for sp in state.specs] != sorted_paths:
+    if state.specs and all(spec.done_count >= 3 for spec in state.specs):
+        return LoopResult(0, "Goal achieved!", 0)
+
+    # Sort specs by priority and select the highest priority one
+    sorted_specs = _sort_specs_for_run(specs, root)
+    sorted_paths = [spec.rel_posix for spec in sorted_specs]
+
+    # Find the highest priority spec that needs work
+    best_index = 0
+    for path in sorted_paths:
+        spec_idx = next((i for i, s in enumerate(state.specs) if s.path == path), None)
+        if spec_idx is not None:
+            spec_progress = state.specs[spec_idx]
+            # Select first spec that isn't already at 3/3
+            if spec_progress.done_count < 3:
+                best_index = spec_idx
+                break
+
+    # Update current_index to the highest priority spec
+    if state.current_index != best_index:
         state = MultiSpecState(
             version=state.version,
             iteration=state.iteration,
             status=state.status,
-            current_index=0,  # Reset to start of sorted list
-            specs=[
-                next((sp for sp in state.specs if sp.path == path), SpecProgress(path=path))
-                for path in sorted_paths
-            ],
+            current_index=best_index,
+            specs=state.specs,
         )
         write_multi_state(state, root)
     iteration = state.iteration
@@ -515,6 +541,9 @@ def run_loop(
 
     try:
         while iteration < max_iter:
+            if state.specs and all(spec.done_count >= 3 for spec in state.specs):
+                return LoopResult(0, "Goal achieved!", iterations_run)
+
             # Check if we have any agents left
             if agent_pool.is_empty():
                 return LoopResult(4, "All agents exhausted", iterations_run)
@@ -624,8 +653,73 @@ def run_loop(
                 else:
                     return LoopResult(exit_code or 1, "Unknown error", iterations_run)
 
+            # Determine next spec based on focused execution rules
             if state.specs:
-                next_index = (state.current_index + 1) % len(state.specs)
+                previous_paths = {spec.path for spec in state.specs}
+                # Re-discover specs to check for new/modified/removed files
+                new_specs = discover_specs(root)
+                if not new_specs:
+                    return LoopResult(1, "No spec files found", iterations_run)
+
+                # Update state with current spec discovery
+                state = ensure_state([spec.rel_posix for spec in new_specs], root)
+
+                # Sort specs by priority
+                sorted_specs = _sort_specs_for_run(new_specs, root)
+                sorted_paths = [spec.rel_posix for spec in sorted_specs]
+                discovered_paths = {spec.rel_posix for spec in new_specs}
+                added_paths = discovered_paths - previous_paths
+
+                # Get current spec status
+                current_spec_status = result.status
+                current_had_changes = bool(result.files_changed)
+
+                # Determine next spec index
+                next_index = state.current_index
+
+                # Only switch specs if current spec is DONE with no changes
+                if current_spec_status == Status.DONE and not current_had_changes:
+                    # Current spec finished cleanly.
+                    # Find the next highest-priority spec that needs work,
+                    # preferring others over current.
+                    current_spec_path = state.specs[state.current_index].path
+                    found_alternative = False
+
+                    # First pass: look for other specs that need work
+                    for path in sorted_paths:
+                        if path == current_spec_path:
+                            continue  # Skip current spec in first pass
+                        sp: SpecProgress | None = next(
+                            (s for s in state.specs if s.path == path), None
+                        )
+                        if sp and sp.done_count < 3:
+                            # Found an alternative spec that needs work
+                            next_index = next(
+                                (i for i, s in enumerate(state.specs) if s.path == path),
+                                state.current_index,
+                            )
+                            found_alternative = True
+                            break
+
+                    # Second pass: if no alternatives, check if current spec still needs work
+                    if not found_alternative:
+                        current_spec = state.specs[state.current_index]
+                        if current_spec.done_count < 3:
+                            # Current spec is the only one that needs work, continue with it
+                            next_index = state.current_index
+                else:
+                    # Current spec needs more work (CONTINUE/ROTATE/STUCK or DONE with changes)
+                    # Only switch if there's a completely new spec (highest priority exception)
+                    for path in sorted_paths:
+                        if path in added_paths:
+                            # New specs always interrupt current work.
+                            next_index = next(
+                                (i for i, s in enumerate(state.specs) if s.path == path),
+                                state.current_index,
+                            )
+                            break
+                    # If no new specs found, stay on current spec (focused execution)
+
                 state = MultiSpecState(
                     version=state.version,
                     iteration=state.iteration,

@@ -146,8 +146,9 @@ class Console:
             if removals:
                 for agent_name, reason in removals:
                     line = f"Agent:        {agent_name} removed ({reason})"
-                    line = self._colors.yellow(line)
-                    self._print(self._box_line(line, color_fn=self._colors.yellow))
+                    self._print(
+                        self._box_line(self._colors.yellow(line), color_fn=self._colors.cyan)
+                    )
 
             # Show verification status for DONE
             if status == Status.DONE:

@@ -48,6 +48,29 @@ class RecordingAgent:
         return False
 
 
+class AddsSpecAgent(RecordingAgent):
+    """Agent that adds a new spec on first invoke while returning CONTINUE."""
+
+    def __init__(self, root: Path, new_spec_rel_path: str):
+        super().__init__(root)
+        self._new_spec_rel_path = new_spec_rel_path
+        self._invocations = 0
+
+    def invoke(
+        self,
+        prompt: str,
+        timeout: int = 1800,
+        output_file: Path | None = None,
+        crash_patterns: list[str] | None = None,
+    ) -> AgentResult:
+        self._invocations += 1
+        if self._invocations == 1:
+            spec_path = self._root / self._new_spec_rel_path
+            spec_path.parent.mkdir(parents=True, exist_ok=True)
+            spec_path.write_text("# Goal\nNew spec")
+        return super().invoke(prompt, timeout, output_file, crash_patterns)
+
+
 def test_spec_discovery_and_sorting(temp_project: Path) -> None:
     """Discover specs from all locations with prompt first and sorted paths."""
     (temp_project / "PROMPT.md").write_text("# Goal\n\nPrompt")
@@ -89,8 +112,8 @@ def test_spec_resource_key_uses_name_and_hash() -> None:
     assert len(key.split("-")[-1]) == 6
 
 
-def test_round_robin_iteration_order(project_with_prompt: Path) -> None:
-    """Specs rotate in sorted order across iterations."""
+def test_focused_execution_initial_priority(project_with_prompt: Path) -> None:
+    """run_loop starts with highest priority spec (PROMPT.md first)."""
     (project_with_prompt / "specs").mkdir(exist_ok=True)
     (project_with_prompt / "specs" / "a.spec.md").write_text("# Goal\nA")
     (project_with_prompt / "specs" / "b.spec.md").write_text("# Goal\nB")
@@ -112,7 +135,9 @@ def test_round_robin_iteration_order(project_with_prompt: Path) -> None:
     )
 
     assert result.exit_code == 3
-    assert observed == ["PROMPT.md", "specs/a.spec.md", "specs/b.spec.md"]
+    # With focused execution, RecordingAgent returns CONTINUE,
+    # so it stays on PROMPT.md for all 3 iterations
+    assert observed == ["PROMPT.md", "PROMPT.md", "PROMPT.md"]
 
 
 def test_per_spec_handoffs_and_history_isolation(initialized_project: Path) -> None:
@@ -158,7 +183,7 @@ def test_ensure_state_creates_spec_resources(initialized_project: Path) -> None:
 
 
 def test_counters_reset_on_files_changed() -> None:
-    """Any file changes reset all spec counters."""
+    """File changes reset current spec and only downgrade other 3/3 specs."""
     state = MultiSpecState(
         version=1,
         iteration=1,
@@ -166,13 +191,19 @@ def test_counters_reset_on_files_changed() -> None:
         current_index=0,
         specs=[
             SpecProgress(path="a.spec.md", done_count=2),
-            SpecProgress(path="b.spec.md", done_count=1),
+            SpecProgress(path="b.spec.md", done_count=3),
+            SpecProgress(path="c.spec.md", done_count=1),
         ],
     )
     action, exit_code, updated, _ = handle_status(state, 0, Status.DONE, ["file.py"], "hash-a")
     assert action == "continue"
     assert exit_code is None
-    assert all(spec.done_count == 0 for spec in updated.specs)
+    # Current spec (index 0) gets DONE with changes, so it's set to 1
+    assert updated.specs[0].done_count == 1
+    # Other fully verified specs downgrade to 2/3
+    assert updated.specs[1].done_count == 2
+    # Other in-progress specs remain unchanged
+    assert updated.specs[2].done_count == 1
 
 
 def test_completion_when_all_specs_reach_three() -> None:
@@ -193,8 +224,8 @@ def test_completion_when_all_specs_reach_three() -> None:
     assert done_count == 3
 
 
-def test_spec_added_resets_all_counters(initialized_project: Path) -> None:
-    """Adding a new spec file resets all counters."""
+def test_spec_added_preserves_existing_progress(initialized_project: Path) -> None:
+    """Adding a new spec preserves existing progress and initializes only the new one."""
     from ralph.core.state import ensure_state, write_multi_state
 
     # Set up initial state with one spec and progress
@@ -211,14 +242,17 @@ def test_spec_added_resets_all_counters(initialized_project: Path) -> None:
     new_spec_paths = ["PROMPT.md", "specs/new.spec.md"]
     result = ensure_state(new_spec_paths, initialized_project)
 
-    # All counters should be reset to 0
+    # Existing spec progress is preserved, new spec starts at 0
     assert len(result.specs) == 2
-    assert all(spec.done_count == 0 for spec in result.specs)
+    assert result.specs[0].path == "PROMPT.md"
+    assert result.specs[0].done_count == 2
+    assert result.specs[1].path == "specs/new.spec.md"
+    assert result.specs[1].done_count == 0
     assert result.iteration == 5  # iteration preserved
 
 
-def test_spec_removed_resets_all_counters(initialized_project: Path) -> None:
-    """Removing a spec file resets all counters."""
+def test_spec_removed_preserves_remaining_progress(initialized_project: Path) -> None:
+    """Removing a spec drops only the removed entry and preserves remaining progress."""
     from ralph.core.state import ensure_state, write_multi_state
 
     # Set up initial state with two specs
@@ -238,9 +272,9 @@ def test_spec_removed_resets_all_counters(initialized_project: Path) -> None:
     new_spec_paths = ["PROMPT.md"]
     result = ensure_state(new_spec_paths, initialized_project)
 
-    # All counters should be reset to 0
+    # Remaining spec progress is preserved
     assert len(result.specs) == 1
-    assert result.specs[0].done_count == 0
+    assert result.specs[0].done_count == 2
     assert result.current_index == 0  # reset since old index invalid
 
 
@@ -363,7 +397,7 @@ def test_ensure_state_clears_status_on_spec_content_change(initialized_project: 
     assert result.specs[0].done_count == 0
     assert result.specs[0].last_status is None
     assert result.specs[0].last_hash == initial_hash
-    assert result.specs[1].done_count == 0
+    assert result.specs[1].done_count == 1
     assert result.specs[1].last_status == "CONTINUE"
     assert result.specs[1].last_hash == hash_b
 
@@ -404,8 +438,8 @@ def test_ensure_state_preserves_spec_order_on_change(initialized_project: Path) 
     assert [spec.path for spec in result.specs] == ["specs/a.spec.md", "specs/b.spec.md"]
 
 
-def test_ensure_state_clears_last_status_on_spec_change(initialized_project: Path) -> None:
-    """ensure_state clears last_status when spec list changes."""
+def test_ensure_state_preserves_last_status_on_spec_list_change(initialized_project: Path) -> None:
+    """ensure_state preserves existing spec state when spec list changes."""
     from ralph.core.state import ensure_state, write_multi_state
 
     initial_state = MultiSpecState(
@@ -422,9 +456,9 @@ def test_ensure_state_clears_last_status_on_spec_change(initialized_project: Pat
     # Add a new spec
     result = ensure_state(["a.spec.md", "new.spec.md"], initialized_project)
 
-    # All specs should have reset done_count and last_status
-    assert result.specs[0].done_count == 0
-    assert result.specs[0].last_status is None
+    # Existing spec is preserved, new spec starts empty
+    assert result.specs[0].done_count == 2
+    assert result.specs[0].last_status == "CONTINUE"
     assert result.specs[1].done_count == 0
     assert result.specs[1].last_status is None
 
@@ -456,7 +490,7 @@ def test_handle_status_updates_last_status() -> None:
 
 
 def test_handle_status_preserves_last_status_on_reset() -> None:
-    """When files change, last_status is preserved but done_count resets."""
+    """When files change, last_status is preserved and other in-progress counters stay stable."""
     state = MultiSpecState(
         version=1,
         iteration=1,
@@ -468,11 +502,12 @@ def test_handle_status_preserves_last_status_on_reset() -> None:
         ],
     )
 
-    # Files changed - should reset done_count but preserve last_status
+    # Files changed - current spec resets; other specs keep non-3/3 counters
     action, exit_code, updated, _ = handle_status(state, 0, Status.DONE, ["file.py"], "hash-a")
 
-    # done_count reset for all specs
-    assert all(spec.done_count == 0 for spec in updated.specs)
+    # done_count behavior
+    assert updated.specs[0].done_count == 1  # Current spec: DONE with changes -> 1
+    assert updated.specs[1].done_count == 1  # Other spec unchanged (not 3/3)
     # last_status preserved for other specs, updated for current
     assert updated.specs[0].last_status == "DONE"  # Current spec updated
     assert updated.specs[0].last_hash == "hash-a"
@@ -605,8 +640,8 @@ def test_sort_specs_by_state_prioritizes_new(initialized_project: Path) -> None:
     ]
 
     # b is DONE with matching hash (no file changes), a and c are new (not in spec_states)
-    spec_states: dict[str, tuple[str | None, str | None, bool]] = {
-        "specs/b.spec.md": ("DONE", hash_b, False),
+    spec_states: dict[str, tuple[str | None, str | None, bool, int]] = {
+        "specs/b.spec.md": ("DONE", hash_b, False, 0),
     }
 
     sorted_specs = sort_specs_by_state(specs, spec_states, initialized_project)
@@ -642,9 +677,9 @@ def test_sort_specs_by_state_prioritizes_non_done(initialized_project: Path) -> 
     ]
 
     # b is CONTINUE (non-DONE), a is DONE - both with matching hashes
-    spec_states: dict[str, tuple[str | None, str | None, bool]] = {
-        "specs/a.spec.md": ("DONE", hash_a, False),
-        "specs/b.spec.md": ("CONTINUE", hash_b, False),
+    spec_states: dict[str, tuple[str | None, str | None, bool, int]] = {
+        "specs/a.spec.md": ("DONE", hash_a, False, 0),
+        "specs/b.spec.md": ("CONTINUE", hash_b, False, 0),
     }
 
     sorted_specs = sort_specs_by_state(specs, spec_states, initialized_project)
@@ -767,6 +802,37 @@ def test_spec_priority_key_five_tiers() -> None:
     assert key_new < key_modified < key_non_done < key_done_modified < key_done_clean
 
 
+def test_spec_priority_key_tier_4_verification_count() -> None:
+    """Within tier 4 (DONE without file changes), lower verification count comes first."""
+    from ralph.core.specs import spec_priority_key
+
+    # All are tier 4 (DONE without file changes) but different verification counts
+    key_1_of_3 = spec_priority_key(
+        "a.spec.md", "DONE", "hash", "hash", modified_files=False, done_count=1
+    )
+    key_2_of_3 = spec_priority_key(
+        "a.spec.md", "DONE", "hash", "hash", modified_files=False, done_count=2
+    )
+    key_3_of_3 = spec_priority_key(
+        "a.spec.md", "DONE", "hash", "hash", modified_files=False, done_count=3
+    )
+
+    # All should be tier 4
+    assert key_1_of_3[0] == key_2_of_3[0] == key_3_of_3[0] == 4
+
+    # Lower done_count should come first
+    assert key_1_of_3 < key_2_of_3 < key_3_of_3
+
+    # When done_count is the same, alphabetical order is the tie-breaker
+    key_a_2_of_3 = spec_priority_key(
+        "a.spec.md", "DONE", "hash", "hash", modified_files=False, done_count=2
+    )
+    key_b_2_of_3 = spec_priority_key(
+        "b.spec.md", "DONE", "hash", "hash", modified_files=False, done_count=2
+    )
+    assert key_a_2_of_3 < key_b_2_of_3
+
+
 def test_sort_specs_by_state_done_with_changes_before_clean(initialized_project: Path) -> None:
     """DONE specs that modified files come before DONE specs that didn't."""
     from ralph.core.specs import Spec, sort_specs_by_state, spec_content_hash
@@ -792,9 +858,9 @@ def test_sort_specs_by_state_done_with_changes_before_clean(initialized_project:
     ]
 
     # Both DONE, but modified.spec.md had file changes
-    spec_states: dict[str, tuple[str | None, str | None, bool]] = {
-        "specs/clean.spec.md": ("DONE", hash_clean, False),  # No file changes
-        "specs/modified.spec.md": ("DONE", hash_modified, True),  # Had file changes
+    spec_states: dict[str, tuple[str | None, str | None, bool, int]] = {
+        "specs/clean.spec.md": ("DONE", hash_clean, False, 0),  # No file changes
+        "specs/modified.spec.md": ("DONE", hash_modified, True, 0),  # Had file changes
     }
 
     sorted_specs = sort_specs_by_state(specs, spec_states, initialized_project)
@@ -802,6 +868,52 @@ def test_sort_specs_by_state_done_with_changes_before_clean(initialized_project:
 
     # DONE with file changes should come before DONE without
     assert sorted_paths == ["specs/modified.spec.md", "specs/clean.spec.md"]
+
+
+def test_sort_specs_by_state_tier_4_verification_count(initialized_project: Path) -> None:
+    """Within tier 4, DONE specs with lower verification count come first."""
+    from ralph.core.specs import Spec, sort_specs_by_state, spec_content_hash
+
+    (initialized_project / "specs").mkdir(exist_ok=True)
+    (initialized_project / "specs" / "a.spec.md").write_text("# A")
+    (initialized_project / "specs" / "b.spec.md").write_text("# B")
+    (initialized_project / "specs" / "c.spec.md").write_text("# C")
+
+    # Get actual content hashes
+    hash_a = spec_content_hash(initialized_project / "specs" / "a.spec.md")
+    hash_b = spec_content_hash(initialized_project / "specs" / "b.spec.md")
+    hash_c = spec_content_hash(initialized_project / "specs" / "c.spec.md")
+
+    specs = [
+        Spec(
+            path=initialized_project / "specs" / "a.spec.md",
+            rel_posix="specs/a.spec.md",
+            is_prompt=False,
+        ),
+        Spec(
+            path=initialized_project / "specs" / "b.spec.md",
+            rel_posix="specs/b.spec.md",
+            is_prompt=False,
+        ),
+        Spec(
+            path=initialized_project / "specs" / "c.spec.md",
+            rel_posix="specs/c.spec.md",
+            is_prompt=False,
+        ),
+    ]
+
+    # All are DONE without file changes (tier 4) but different verification counts
+    spec_states: dict[str, tuple[str | None, str | None, bool, int]] = {
+        "specs/a.spec.md": ("DONE", hash_a, False, 2),  # 2/3
+        "specs/b.spec.md": ("DONE", hash_b, False, 3),  # 3/3
+        "specs/c.spec.md": ("DONE", hash_c, False, 1),  # 1/3
+    }
+
+    sorted_specs = sort_specs_by_state(specs, spec_states, initialized_project)
+    sorted_paths = [s.rel_posix for s in sorted_specs]
+
+    # Within tier 4, lower verification count should come first
+    assert sorted_paths == ["specs/c.spec.md", "specs/a.spec.md", "specs/b.spec.md"]
 
 
 def test_handle_status_sets_modified_files_on_done() -> None:
@@ -903,7 +1015,7 @@ def test_ensure_state_preserves_order_when_specs_unchanged(initialized_project: 
 
 
 def test_ensure_state_uses_new_order_when_specs_change(initialized_project: Path) -> None:
-    """ensure_state uses the new order when spec set changes."""
+    """ensure_state preserves existing order and appends newly added specs."""
     from ralph.core.state import ensure_state, write_multi_state
 
     # Set up state with one spec
@@ -921,10 +1033,10 @@ def test_ensure_state_uses_new_order_when_specs_change(initialized_project: Path
     # Call ensure_state with a NEW spec added (different set)
     result = ensure_state(["specs/a.spec.md", "specs/b.spec.md"], initialized_project)
 
-    # Order should come from the input (a, b), not preserved from old state
+    # Existing entries keep their order; new entries append in discovery order
     assert [spec.path for spec in result.specs] == [
-        "specs/a.spec.md",
         "specs/b.spec.md",
+        "specs/a.spec.md",
     ]
 
 
@@ -983,8 +1095,8 @@ def test_run_loop_sorts_specs_by_priority(project_with_prompt: Path) -> None:
     assert observed[0] == "specs/b.spec.md"
 
 
-def test_run_loop_maintains_order_during_run(project_with_prompt: Path) -> None:
-    """run_loop maintains spec order during a run (round-robin)."""
+def test_focused_execution_stays_on_spec(project_with_prompt: Path) -> None:
+    """run_loop stays on the same spec when it returns CONTINUE."""
     from ralph.core.specs import spec_content_hash
     from ralph.core.state import write_multi_state
 
@@ -997,8 +1109,7 @@ def test_run_loop_maintains_order_during_run(project_with_prompt: Path) -> None:
     hash_a = spec_content_hash(project_with_prompt / "specs" / "a.spec.md")
     hash_b = spec_content_hash(project_with_prompt / "specs" / "b.spec.md")
 
-    # Set up state with non-alphabetical order that should be maintained
-    # b is CONTINUE (will be sorted first), PROMPT is DONE, a is DONE
+    # Set up state with b as CONTINUE (highest priority)
     initial_state = MultiSpecState(
         version=1,
         iteration=0,
@@ -1033,12 +1144,38 @@ def test_run_loop_maintains_order_during_run(project_with_prompt: Path) -> None:
     )
 
     assert result.exit_code == 3
-    # Should maintain round-robin in order: b, PROMPT, a, b, PROMPT, a
+    # With focused execution, RecordingAgent returns CONTINUE,
+    # so it stays on specs/b.spec.md for all iterations
     assert observed == [
         "specs/b.spec.md",
-        "PROMPT.md",
-        "specs/a.spec.md",
         "specs/b.spec.md",
-        "PROMPT.md",
-        "specs/a.spec.md",
+        "specs/b.spec.md",
+        "specs/b.spec.md",
+        "specs/b.spec.md",
+        "specs/b.spec.md",
     ]
+
+
+def test_new_spec_interrupts_current_focus(project_with_prompt: Path) -> None:
+    """A newly discovered spec interrupts CONTINUE/ROTATE focus immediately."""
+    (project_with_prompt / "specs").mkdir(exist_ok=True)
+    (project_with_prompt / "specs" / "b.spec.md").write_text("# Goal\nB")
+
+    agent = AddsSpecAgent(project_with_prompt, "specs/a-new.spec.md")
+    pool = AgentPool([agent])
+    observed: list[str] = []
+
+    def on_iteration_start(
+        iteration: int, max_iter: int, done_count: int, agent_name: str, spec_path: str
+    ) -> None:
+        observed.append(spec_path)
+
+    result = run_loop(
+        max_iter=2,
+        root=project_with_prompt,
+        agent_pool=pool,
+        on_iteration_start=on_iteration_start,
+    )
+
+    assert result.exit_code == 3
+    assert observed == ["PROMPT.md", "specs/a-new.spec.md"]

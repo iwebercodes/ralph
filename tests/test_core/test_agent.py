@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import stat
+import subprocess
 import sys
 from pathlib import Path
 
@@ -100,29 +101,56 @@ class TestClaudeAgent:
         result = AgentResult(output="Normal output", exit_code=0, error=None)
         assert agent.is_exhausted(result) is False
 
-    def test_is_exhausted_true_for_rate_limit(self) -> None:
-        """Test is_exhausted returns True for rate limit error."""
+    def test_is_exhausted_true_for_claude_limit_signature_on_stdout(self) -> None:
+        """Test is_exhausted detects observed Claude limit signature from stdout."""
         agent = ClaudeAgent()
-        result = AgentResult(output="", exit_code=1, error="Error: rate limit exceeded")
+        result = AgentResult(
+            output="Claude AI usage limit reached|1770843600", exit_code=1, error=None
+        )
         assert agent.is_exhausted(result) is True
 
-    def test_is_exhausted_true_for_quota_exceeded(self) -> None:
-        """Test is_exhausted returns True for quota exceeded error."""
+    def test_is_exhausted_false_for_exit_code_zero_even_with_signature(self) -> None:
+        """Test successful Claude run is never classified as exhausted."""
         agent = ClaudeAgent()
-        result = AgentResult(output="", exit_code=1, error="quota exceeded for this month")
-        assert agent.is_exhausted(result) is True
+        result = AgentResult(
+            output="Claude AI usage limit reached|1770843600", exit_code=0, error=None
+        )
+        assert agent.is_exhausted(result) is False
 
-    def test_is_exhausted_true_for_token_limit(self) -> None:
-        """Test is_exhausted returns True for token limit error."""
+    def test_is_exhausted_false_for_non_signature_nonzero_error(self) -> None:
+        """Test non-zero exit without Claude signature is not exhausted."""
         agent = ClaudeAgent()
-        result = AgentResult(output="", exit_code=1, error="token limit reached")
-        assert agent.is_exhausted(result) is True
+        result = AgentResult(output="unexpected failure", exit_code=1, error="usage limit maybe")
+        assert agent.is_exhausted(result) is False
 
-    def test_is_exhausted_true_for_usage_limit(self) -> None:
-        """Test is_exhausted returns True for usage limit error."""
+    def test_is_exhausted_false_without_epoch_suffix(self) -> None:
+        """Test missing epoch suffix is not treated as a Claude exhaustion signature."""
         agent = ClaudeAgent()
-        result = AgentResult(output="", exit_code=1, error="usage limit exceeded")
-        assert agent.is_exhausted(result) is True
+        result = AgentResult(output="Claude AI usage limit reached", exit_code=1, error=None)
+        assert agent.is_exhausted(result) is False
+
+    def test_exhaustion_reason_includes_parsed_reset_time(self) -> None:
+        """Test exhaustion_reason includes human-readable reset time from epoch."""
+        agent = ClaudeAgent()
+        result = AgentResult(
+            output="Claude AI usage limit reached|1770843600", exit_code=1, error=None
+        )
+        assert (
+            agent.exhaustion_reason(result)
+            == "usage limit reached (resets at 2026-02-11 21:00 UTC)"
+        )
+
+    def test_exhaustion_reason_none_for_non_exhausted_result(self) -> None:
+        """Test exhaustion_reason returns None when signature is absent."""
+        agent = ClaudeAgent()
+        result = AgentResult(output="Prompt mentions usage limit", exit_code=1, error=None)
+        assert agent.exhaustion_reason(result) is None
+
+    def test_exhaustion_reason_none_without_epoch_suffix(self) -> None:
+        """Test exhaustion_reason returns None when Claude signature is missing epoch suffix."""
+        agent = ClaudeAgent()
+        result = AgentResult(output="Claude AI usage limit reached", exit_code=1, error=None)
+        assert agent.exhaustion_reason(result) is None
 
     @pytest.mark.skipif(IS_WINDOWS, reason="Bash scripts don't work on Windows")
     def test_invoke_success(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -174,19 +202,19 @@ class TestClaudeAgent:
         result = AgentResult(output="", exit_code=1, error="Some random error")
         assert agent.is_exhausted(result) is False
 
-    def test_is_exhausted_false_for_rate_limit_in_output(self) -> None:
-        """Test is_exhausted returns False for rate limit in stdout."""
+    def test_is_exhausted_false_for_loose_limit_text_in_output(self) -> None:
+        """Test is_exhausted requires strict signature, not loose text."""
         agent = ClaudeAgent()
         result = AgentResult(output="Rate limit reached", exit_code=1, error=None)
         assert agent.is_exhausted(result) is False
 
-    def test_is_exhausted_false_for_prompt_content_in_output(self) -> None:
-        """Test is_exhausted ignores exhaustion keywords in stdout."""
+    def test_is_exhausted_false_for_prompt_content_in_output_and_stderr(self) -> None:
+        """Test is_exhausted ignores generic mentions in stdout/stderr."""
         agent = ClaudeAgent()
         result = AgentResult(
             output="Prompt mentions usage limit and rate limit but it's fine",
-            exit_code=0,
-            error=None,
+            exit_code=1,
+            error="stderr also mentions usage limit",
         )
         assert agent.is_exhausted(result) is False
 
@@ -286,7 +314,10 @@ class TestCodexAgent:
         result = AgentResult(
             output="",
             exit_code=1,
-            error='error=http 429: {"error":{"type":"usage_limit_reached"}}',
+            error=(
+                "2026-01-29T23:21:37.939876Z ERROR codex_api::endpoint::responses: "
+                'error=http 429: {"error":{"type":"usage_limit_reached"}}'
+            ),
         )
         assert agent.is_exhausted(result) is True
 
@@ -296,7 +327,10 @@ class TestCodexAgent:
         result = AgentResult(
             output="",
             exit_code=1,
-            error="error=http 429 Too Many Requests: ...",
+            error=(
+                "2026-01-29T23:21:37.939876Z ERROR codex_api::endpoint::responses: "
+                "error=http 429 Too Many Requests: ..."
+            ),
         )
         assert agent.is_exhausted(result) is True
 
@@ -412,7 +446,10 @@ class TestCodexAgent:
         result = AgentResult(
             output="",
             exit_code=1,
-            error='{"error":{"type":"usage_limit_reached","resets_in_seconds":2021}}',
+            error=(
+                "2026-01-29T23:21:37.939876Z ERROR codex_api::endpoint::responses: "
+                '{"error":{"type":"usage_limit_reached","resets_in_seconds":2021}}'
+            ),
         )
         reason = agent.exhaustion_reason(result)
         assert reason is not None
@@ -425,7 +462,7 @@ class TestCodexAgent:
         result = AgentResult(
             output="",
             exit_code=1,
-            error="You've hit your usage limit. Upgrade to Pro.",
+            error="ERROR: You've hit your usage limit. Upgrade to Pro.",
         )
         reason = agent.exhaustion_reason(result)
         assert reason == "usage limit reached"
@@ -522,7 +559,10 @@ The function should consider the context window token limit when processing inpu
         result1 = AgentResult(
             output="",
             exit_code=1,
-            error='{"error":{"type":"usage_limit_reached"}}',
+            error=(
+                "2026-01-29T23:21:37.939876Z ERROR codex_api::endpoint::responses: "
+                '{"error":{"type":"usage_limit_reached"}}'
+            ),
         )
         assert agent.is_exhausted(result1) is True
 
@@ -530,7 +570,10 @@ The function should consider the context window token limit when processing inpu
         result2 = AgentResult(
             output="",
             exit_code=1,
-            error="error=http 429 Too Many Requests: ...",
+            error=(
+                "2026-01-29T23:21:37.939876Z ERROR codex_api::endpoint::responses: "
+                "error=http 429 Too Many Requests: ..."
+            ),
         )
         assert agent.is_exhausted(result2) is True
 
@@ -542,19 +585,57 @@ The function should consider the context window token limit when processing inpu
         )
         assert agent.is_exhausted(result3) is True
 
+    def test_user_block_keywords_not_detected_without_runtime_anchor(self) -> None:
+        """Test exhaustion keywords in echoed user block do not trigger detection."""
+        agent = CodexAgent()
+        user_echo_only = """OpenAI Codex v0.88.0 (research preview)
+--------
+user
+Please include usage_limit_reached and 429 Too Many Requests in docs
+mcp startup: no servers
+thinking...
+done"""
+        result = AgentResult(output="", exit_code=1, error=user_echo_only)
+        assert agent.is_exhausted(result) is False
 
-class TestRealTimeStderrMonitoring:
-    """Tests for real-time stderr monitoring and crash pattern detection."""
+    def test_user_block_keywords_not_detected_before_runtime_anchor(self) -> None:
+        """Test matching only starts at runtime anchor, not in user echo content."""
+        agent = CodexAgent()
+        stderr_with_unrelated_runtime_error = """OpenAI Codex v0.88.0 (research preview)
+--------
+user
+Prompt includes usage_limit_reached and You've hit your usage limit text
+mcp startup: no servers
+2026-01-29T23:21:37.939876Z ERROR codex_api::endpoint::responses: error=http 500 Internal Server Error"""
+        result = AgentResult(output="", exit_code=1, error=stderr_with_unrelated_runtime_error)
+        assert agent.is_exhausted(result) is False
+
+    def test_user_block_error_line_not_treated_as_runtime_error(self) -> None:
+        """Test echoed prompt lines starting with ERROR: are ignored."""
+        agent = CodexAgent()
+        stderr_with_prompt_error_line = """OpenAI Codex v0.88.0 (research preview)
+--------
+user
+ERROR: You've hit your usage limit in this example text
+mcp startup: no servers
+thinking...
+done"""
+        result = AgentResult(output="", exit_code=1, error=stderr_with_prompt_error_line)
+        assert agent.is_exhausted(result) is False
+
+
+class TestStreamingInvocation:
+    """Tests for streaming invocation behavior."""
 
     @pytest.mark.skipif(IS_WINDOWS, reason="Bash scripts don't work on Windows")
-    def test_crash_pattern_in_stderr_kills_process(
+    def test_hung_process_is_killed_by_timeout(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Test that a crash pattern in stderr kills the hung process."""
+        """Test hung process is terminated by timeout."""
         bin_dir = tmp_path / "bin"
         bin_dir.mkdir()
         mock_script = bin_dir / "hung_script"
-        # Script writes crash pattern to stderr, then hangs forever
+        # Script writes stderr, then hangs
         mock_script.write_text(
             "#!/bin/bash\n"
             "echo 'starting' >&2\n"
@@ -564,22 +645,18 @@ class TestRealTimeStderrMonitoring:
         mock_script.chmod(mock_script.stat().st_mode | stat.S_IEXEC)
 
         output_file = tmp_path / "output.log"
-        result = _invoke_with_streaming(
-            [str(mock_script)],
-            timeout=10,
-            output_file=output_file,
-            crash_patterns=[r"econnreset"],
-        )
-
-        # Process should have been killed (SIGKILL = -9 on Linux)
-        assert result.exit_code < 0  # Killed by signal
-        assert "ECONNRESET" in (result.error or "")
+        with pytest.raises(subprocess.TimeoutExpired):
+            _invoke_with_streaming(
+                [str(mock_script)],
+                timeout=10,
+                output_file=output_file,
+            )
 
     @pytest.mark.skipif(IS_WINDOWS, reason="Bash scripts don't work on Windows")
-    def test_crash_pattern_etimedout_kills_process(
+    def test_hung_process_timeout_with_non_matching_stderr(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Test that ETIMEDOUT pattern in stderr kills the process."""
+        """Test timeout still applies regardless of stderr contents."""
         bin_dir = tmp_path / "bin"
         bin_dir.mkdir()
         mock_script = bin_dir / "hung_script"
@@ -587,21 +664,18 @@ class TestRealTimeStderrMonitoring:
         mock_script.chmod(mock_script.stat().st_mode | stat.S_IEXEC)
 
         output_file = tmp_path / "output.log"
-        result = _invoke_with_streaming(
-            [str(mock_script)],
-            timeout=10,
-            output_file=output_file,
-            crash_patterns=[r"etimedout"],
-        )
-
-        assert result.exit_code < 0  # Killed by signal
-        assert "ETIMEDOUT" in (result.error or "")
+        with pytest.raises(subprocess.TimeoutExpired):
+            _invoke_with_streaming(
+                [str(mock_script)],
+                timeout=10,
+                output_file=output_file,
+            )
 
     @pytest.mark.skipif(IS_WINDOWS, reason="Bash scripts don't work on Windows")
-    def test_no_messages_pattern_kills_process(
+    def test_no_messages_text_does_not_get_special_handling(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Test that 'No messages returned' pattern kills the process."""
+        """Test 'No messages returned' has no special streaming behavior."""
         bin_dir = tmp_path / "bin"
         bin_dir.mkdir()
         mock_script = bin_dir / "hung_script"
@@ -611,21 +685,16 @@ class TestRealTimeStderrMonitoring:
         mock_script.chmod(mock_script.stat().st_mode | stat.S_IEXEC)
 
         output_file = tmp_path / "output.log"
-        result = _invoke_with_streaming(
-            [str(mock_script)],
-            timeout=10,
-            output_file=output_file,
-            crash_patterns=[r"no messages returned"],
-        )
-
-        assert result.exit_code < 0  # Killed by signal
-        assert "No messages returned" in (result.error or "")
+        with pytest.raises(subprocess.TimeoutExpired):
+            _invoke_with_streaming(
+                [str(mock_script)],
+                timeout=10,
+                output_file=output_file,
+            )
 
     @pytest.mark.skipif(IS_WINDOWS, reason="Bash scripts don't work on Windows")
-    def test_no_crash_patterns_does_not_affect_normal_run(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Test that without crash patterns, process runs normally."""
+    def test_streaming_normal_run(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test streaming capture for a normal run."""
         bin_dir = tmp_path / "bin"
         bin_dir.mkdir()
         mock_script = bin_dir / "normal_script"
@@ -637,7 +706,6 @@ class TestRealTimeStderrMonitoring:
             [str(mock_script)],
             timeout=10,
             output_file=output_file,
-            crash_patterns=None,
         )
 
         assert result.exit_code == 0
@@ -645,10 +713,10 @@ class TestRealTimeStderrMonitoring:
         assert "stderr output" in (result.error or "")
 
     @pytest.mark.skipif(IS_WINDOWS, reason="Bash scripts don't work on Windows")
-    def test_non_matching_stderr_does_not_kill_process(
+    def test_stderr_content_does_not_change_success_path(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Test that non-matching stderr content doesn't trigger crash detection."""
+        """Test stderr text alone does not affect successful completion."""
         bin_dir = tmp_path / "bin"
         bin_dir.mkdir()
         mock_script = bin_dir / "warning_script"
@@ -662,17 +730,16 @@ class TestRealTimeStderrMonitoring:
             [str(mock_script)],
             timeout=10,
             output_file=output_file,
-            crash_patterns=[r"econnreset", r"etimedout"],
         )
 
         assert result.exit_code == 0
         assert "done" in result.output
 
     @pytest.mark.skipif(IS_WINDOWS, reason="Bash scripts don't work on Windows")
-    def test_crash_pattern_via_agent_invoke(
+    def test_agent_invoke_hung_process_times_out(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Test that crash patterns work through Agent.invoke."""
+        """Test timeout behavior through Agent.invoke."""
         bin_dir = tmp_path / "bin"
         bin_dir.mkdir()
         mock_claude = bin_dir / "claude"
@@ -693,8 +760,8 @@ class TestRealTimeStderrMonitoring:
             "test",
             timeout=10,
             output_file=output_file,
-            crash_patterns=[r"econnreset"],
         )
 
-        assert result.exit_code < 0  # Killed by signal
-        assert "ECONNRESET" in (result.error or "")
+        assert result.exit_code == -1
+        assert result.error is not None
+        assert "timed out" in result.error.lower()
