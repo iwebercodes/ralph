@@ -9,6 +9,28 @@ from ralph.core.state import Status
 from ralph.output.colors import ColorContext
 
 
+def format_human_duration(seconds: float) -> str:
+    """Format duration in seconds as human-readable string.
+
+    Examples:
+        45 → "45s"
+        133 → "2m 13s"
+        3665 → "1h 1m 5s"
+    """
+    total_seconds = int(seconds)
+
+    hours = total_seconds // 3600
+    minutes = (total_seconds % 3600) // 60
+    secs = total_seconds % 60
+
+    if hours > 0:
+        return f"{hours}h {minutes}m {secs}s"
+    elif minutes > 0:
+        return f"{minutes}m {secs}s"
+    else:
+        return f"{secs}s"
+
+
 class Console:
     """Console output handler."""
 
@@ -113,6 +135,7 @@ class Console:
         files_changed: list[str],
         done_count: int,
         agent_removals: tuple[tuple[str, str], ...] | None = None,
+        duration: float | None = None,
     ) -> None:
         """Print rotation completion and close the box."""
         change_count = len(files_changed)
@@ -143,6 +166,11 @@ class Console:
                 files_str = self._colors.yellow(f"{change_count} files changed")
                 self._print(self._box_line(f"Files:        {files_str}"))
 
+            # Show timing if available
+            if duration is not None:
+                time_str = format_human_duration(duration)
+                self._print(self._box_line(f"Time:         {time_str}"))
+
             if removals:
                 for agent_name, reason in removals:
                     line = f"Agent:        {agent_name} removed ({reason})"
@@ -167,6 +195,9 @@ class Console:
             else:
                 changes_str = f"{change_count} files changed"
             self._print(f"[ralph] Result: {status.value} ({changes_str})")
+            if duration is not None:
+                time_str = format_human_duration(duration)
+                self._print(f"[ralph] Time: {time_str}")
             for agent_name, reason in removals:
                 self._print(f"[ralph] Agent removed: {agent_name} ({reason})")
             if status == Status.DONE:

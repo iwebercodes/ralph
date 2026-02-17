@@ -328,10 +328,11 @@ def _format_duration(seconds: int) -> str:
     remaining_minutes = minutes % 60
     if remaining_minutes == 0:
         return f"{hours} hours" if hours > 1 else "1 hour"
+    minutes_str = "minutes" if remaining_minutes != 1 else "minute"
     return (
-        f"{hours} hours {remaining_minutes} minutes"
+        f"{hours} hours {remaining_minutes} {minutes_str}"
         if hours > 1
-        else f"1 hour {remaining_minutes} minutes"
+        else f"1 hour {remaining_minutes} {minutes_str}"
     )
 
 

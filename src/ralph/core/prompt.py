@@ -40,14 +40,15 @@ Before signaling ROTATE or DONE, review your work and ask:
 - Did I make mistakes that future rotations should avoid?
 - Are there patterns or approaches that worked well?
 
-Add valuable lessons to .ralph/guardrails.md. Good guardrails are:
+Add valuable lessons to .ralph/guardrails.md (the folder and the file exist already).
+Good guardrails are:
 - Specific and actionable (not vague advice)
 - About THIS project (not general programming wisdom)
 - Things that aren't obvious from reading the code
 
 ## COMPLETION SIGNALS
 
-Write ONE of these to .ralph/status:
+Write ONE of these to .ralph/status (the folder and the file exist already):
 - **CONTINUE** - Still working, making progress (default)
 - **ROTATE** - Ready for fresh context (before yours gets too long/polluted)
 - **DONE** - Goal fully achieved, all success criteria met
@@ -59,7 +60,9 @@ Write ONE of these to .ralph/status:
 - ALWAYS update the handoff for this spec before signaling ROTATE or DONE
 - Signal ROTATE proactively when you feel context getting cluttered
 - Only signal DONE when ALL success criteria in the current spec file are met
-- NEVER modify spec files (PROMPT.md, *.spec.md) unless the spec explicitly asks you to
+- NEVER modify spec files (PROMPT.md, *.spec.md in folders "specs" and ".ralph/specs")
+  unless the spec explicitly asks you to
+- ALWAYS clean up temporary files and folders you created for testing or for experiments
 """
 
 PROMPT_TEMPLATE_REVIEW = """# RALPH LOOP - ROTATION {iteration}/{max_iter} [REVIEW]
@@ -86,11 +89,14 @@ Spec file: {spec_path}
    - Inspect the code critically
    - Test edge cases the previous rotation might have skipped
    - Write temporary test scripts if needed to verify behavior
-3. **Check Every Criterion**: Go through PROMPT.md success criteria one by one.
+3. **Check Every Criterion**: Go through current spec {spec_path} success criteria one by one.
 4. **If Anything Is Wrong**: Fix it, update the handoff for this spec,
-   and signal CONTINUE (not DONE).
+   and signal CONTINUE (not DONE). Handoff file is ({handoff_path}).
 5. **If Everything Passes**: Update the handoff for this spec confirming your verification,
-   signal DONE.
+   signal DONE. Handoff file is ({handoff_path}).
+6. **Clean Up**: Before finishing, clean up temporary files and/or folder you've created.
+   Especially temporary scripts used for verification. But also artifacts like
+   screenshots or tool use reports.
 
 ## GUARDRAILS
 
@@ -105,7 +111,7 @@ Even during review, you may discover lessons worth preserving:
 - Assumptions that turned out to be wrong
 - Tricky areas that need extra attention
 
-Add valuable lessons to .ralph/guardrails.md.
+Add valuable lessons to .ralph/guardrails.md (the folder and the file exist already).
 
 ## VERIFICATION PROTOCOL
 
@@ -116,7 +122,7 @@ If you make ANY changes during review, verification resets to 0.
 
 ## COMPLETION SIGNALS
 
-Write ONE of these to .ralph/status:
+Write ONE of these to .ralph/status (the folder and the file exist already):
 - **CONTINUE** - Found issues, made fixes, need another rotation
 - **DONE** - Independently verified, all success criteria genuinely met
 - **STUCK** - Blocked, need human help
@@ -127,7 +133,9 @@ Write ONE of these to .ralph/status:
 - Verification must be independent and thorough
 - Finding problems is good - that's what review is for
 - Only signal DONE if you would stake your reputation on it
-- NEVER modify spec files (PROMPT.md, *.spec.md) unless the spec explicitly asks you to
+- NEVER modify spec files (PROMPT.md, *.spec.md in folders "specs" and ".ralph/specs")
+  unless the spec explicitly asks you to
+- ALWAYS clean up temporary files and folders you created for testing or for experiments
 """
 
 

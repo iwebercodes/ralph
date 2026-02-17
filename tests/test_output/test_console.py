@@ -5,7 +5,33 @@ from __future__ import annotations
 import pytest
 
 from ralph.core.state import Status
-from ralph.output.console import Console
+from ralph.output.console import Console, format_human_duration
+
+
+class TestFormatHumanDuration:
+    """Tests for format_human_duration function."""
+
+    def test_seconds_only(self) -> None:
+        """Test formatting seconds only."""
+        assert format_human_duration(0) == "0s"
+        assert format_human_duration(45) == "45s"
+        assert format_human_duration(59) == "59s"
+        assert format_human_duration(45.7) == "45s"  # Rounds down
+
+    def test_minutes_and_seconds(self) -> None:
+        """Test formatting minutes and seconds."""
+        assert format_human_duration(60) == "1m 0s"
+        assert format_human_duration(133) == "2m 13s"
+        assert format_human_duration(599) == "9m 59s"
+        assert format_human_duration(3599) == "59m 59s"
+
+    def test_hours_minutes_seconds(self) -> None:
+        """Test formatting hours, minutes and seconds."""
+        assert format_human_duration(3600) == "1h 0m 0s"
+        assert format_human_duration(3665) == "1h 1m 5s"
+        assert format_human_duration(4430) == "1h 13m 50s"
+        assert format_human_duration(7385) == "2h 3m 5s"
+        assert format_human_duration(36000) == "10h 0m 0s"
 
 
 class TestConsole:
@@ -127,6 +153,16 @@ class TestConsole:
         )
         output = capsys.readouterr().out
         assert "Agent removed: Codex (usage limit reached (resets in 33 minutes))" in output
+
+    def test_rotation_complete_non_tty_with_duration(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Test rotation complete with duration for non-TTY output."""
+        console = Console(no_color=True)
+        console.rotation_complete(Status.DONE, ["file1.py"], 1, duration=133.0)
+        output = capsys.readouterr().out
+        assert "Result: DONE" in output
+        assert "Time: 2m 13s" in output
 
     def test_rotation_complete_no_changes(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Test rotation complete with no changes."""
@@ -328,6 +364,16 @@ class TestConsoleTTY:
         assert "Files:        no changes" in output
         assert "2/3" in output
         assert "[●●○]" in output
+
+    def test_rotation_complete_tty_with_duration(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Test rotation complete with duration for TTY."""
+        console = Console(no_color=True)
+        console._is_tty = True
+        console.rotation_complete(Status.ROTATE, ["file1.py", "file2.py"], 0, duration=45.0)
+        output = capsys.readouterr().out
+        assert "ROTATE" in output
+        assert "2 files changed" in output
+        assert "Time:         45s" in output
 
     def test_rotation_complete_tty_done_complete(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Test rotation complete with DONE status at 3/3 for TTY."""

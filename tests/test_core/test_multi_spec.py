@@ -7,7 +7,7 @@ from pathlib import Path
 from ralph.core.agent import AgentResult
 from ralph.core.loop import handle_status, run_loop
 from ralph.core.pool import AgentPool
-from ralph.core.specs import discover_specs, spec_hash, spec_resource_key
+from ralph.core.specs import discover_specs, spec_base_name, spec_hash, spec_resource_key
 from ralph.core.state import (
     MultiSpecState,
     SpecProgress,
@@ -110,6 +110,18 @@ def test_spec_resource_key_uses_name_and_hash() -> None:
     key = spec_resource_key("specs/api.spec.md")
     assert key.startswith("api.spec-")
     assert len(key.split("-")[-1]) == 6
+
+
+def test_spec_base_name_handles_tabs() -> None:
+    """Test that spec_base_name replaces tabs with hyphens."""
+    assert spec_base_name("specs/tab\ttabs.spec.md") == "tab-tabs.spec"
+    assert spec_base_name("specs/multi\t\ttabs.spec.md") == "multi--tabs.spec"
+    assert spec_base_name("specs/mixed \ttab space.spec.md") == "mixed--tab-space.spec"
+
+    # Ensure resource keys have no tabs
+    key = spec_resource_key("specs/tab\ttabs.spec.md")
+    assert "\t" not in key
+    assert key.startswith("tab-tabs.spec-")
 
 
 def test_focused_execution_initial_priority(project_with_prompt: Path) -> None:

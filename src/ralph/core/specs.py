@@ -157,6 +157,8 @@ def spec_base_name(rel_posix: str) -> str:
     name = PurePosixPath(normalized).name
     if name.endswith(".md"):
         name = name[:-3]
+    # Replace spaces and tabs with hyphens for filesystem safety
+    name = name.replace(" ", "-").replace("\t", "-")
     return name
 
 

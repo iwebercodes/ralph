@@ -158,9 +158,14 @@ After installing, verify with: claude --version or codex --version"""
     # Show banner at start
     console.banner()
 
+    # Track iteration start time
+    iteration_start_time: float | None = None
+
     def on_iteration_start(
         iteration: int, max_iter: int, done_count: int, agent_name: str, spec_path: str
     ) -> None:
+        nonlocal iteration_start_time
+        iteration_start_time = time.time()
         console.working(done_count, agent_name)
         console.iteration_info(iteration, max_iter, done_count, spec_path)
 
@@ -171,11 +176,17 @@ After installing, verify with: claude --version or codex --version"""
         agent_name: str,
         spec_path: str,
     ) -> None:
+        # Calculate duration
+        duration = None
+        if iteration_start_time is not None:
+            duration = time.time() - iteration_start_time
+
         console.rotation_complete(
             result.status,
             result.files_changed,
             done_count,
             result.agent_removals,
+            duration,
         )
 
         if result.test_result:
