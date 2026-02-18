@@ -32,7 +32,7 @@ class AgentPool:
         """
         if not self._agents:
             raise ValueError("No agents available in pool")
-        return random.choice(self._agents)
+        return random.choice(self._agents)  # nosec B311 - not for security, just agent selection
 
     def remove(self, agent: Agent) -> None:
         """Remove an agent from the pool.

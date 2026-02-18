@@ -11,8 +11,8 @@ from ralph.core.ignore import create_spec, load_ignore_patterns
 
 
 def hash_file(path: Path) -> str:
-    """Compute MD5 hash of a file's contents."""
-    hasher = hashlib.md5()
+    """Compute MD5 hash of a file's contents for change detection (not security)."""
+    hasher = hashlib.md5(usedforsecurity=False)  # nosec B324 - not for security
     try:
         with open(path, "rb") as f:
             for chunk in iter(lambda: f.read(8192), b""):

@@ -14,8 +14,18 @@ if TYPE_CHECKING:
 
 from ralph.cli import app
 from ralph.core.agent import AgentResult
+from ralph.core.loop import IterationResult, LoopResult
 from ralph.core.run_state import RunState, write_run_state
-from ralph.core.state import Status, get_history_dir, read_iteration, write_iteration, write_status
+from ralph.core.state import (
+    MultiSpecState,
+    Status,
+    ensure_state,
+    get_history_dir,
+    read_iteration,
+    write_iteration,
+    write_multi_state,
+    write_status,
+)
 
 runner = CliRunner()
 
@@ -348,6 +358,24 @@ class NamedMockAgent(MockAgentForCLI):
         return self._agent_name
 
 
+class RecordingMockAgent(MockAgentForCLI):
+    """Mock agent that records every prompt it receives."""
+
+    def __init__(self, root: Path):
+        super().__init__(root)
+        self.prompts: list[str] = []
+
+    def invoke(
+        self,
+        prompt: str,
+        timeout: int = 1800,
+        output_file: Path | None = None,
+        crash_patterns: list[str] | None = None,
+    ) -> AgentResult:
+        self.prompts.append(prompt)
+        return super().invoke(prompt, timeout, output_file, crash_patterns)
+
+
 def test_run_agents_claude_only(
     project_with_prompt: Path,
 ) -> None:
@@ -502,3 +530,235 @@ def test_run_agents_shows_available_agents_in_error(
     assert "available agents" in result.output.lower()
     assert "claude" in result.output.lower()
     assert "codex" in result.output.lower()
+
+
+def test_run_filter_option_filters_specs(temp_project: Path) -> None:
+    """Test --filter option filters spec files by substring."""
+    # Create a project with multiple specs
+    runner.invoke(app, ["init"])
+
+    # Create some spec files
+    specs_dir = temp_project / "specs"
+    specs_dir.mkdir()
+
+    (specs_dir / "auth-login.spec.md").write_text("# Auth Login Spec\nImplement login")
+    (specs_dir / "auth-register.spec.md").write_text("# Auth Register Spec\nImplement register")
+    (specs_dir / "database-schema.spec.md").write_text("# Database Schema\nCreate DB schema")
+
+    result = runner.invoke(app, ["run", "--filter", "auth", "--debug-prompt"])
+
+    # Should use one of the auth specs
+    assert result.exit_code == 0
+    assert "Auth" in result.output
+    assert "Database Schema" not in result.output
+
+
+def test_run_filter_executes_only_matching_spec(temp_project: Path) -> None:
+    """Filter controls execution path in the main loop (not debug mode)."""
+    runner.invoke(app, ["init"])
+    specs_dir = temp_project / "specs"
+    specs_dir.mkdir()
+    (specs_dir / "auth.spec.md").write_text("# Auth Spec\nImplement auth")
+    (specs_dir / "user.spec.md").write_text("# User Spec\nImplement users")
+
+    from ralph.core.pool import AgentPool
+
+    mock_agent = RecordingMockAgent(temp_project)
+    mock_agent.responses = [
+        {"status": "DONE", "output": "done", "changes": []},
+        {"status": "DONE", "output": "review-1", "changes": []},
+        {"status": "DONE", "output": "review-2", "changes": []},
+    ]
+    mock_pool = AgentPool([mock_agent])
+
+    with (
+        patch("ralph.commands.run.ClaudeAgent") as mock_claude_cls,
+        patch("ralph.commands.run.CodexAgent") as mock_codex_cls,
+        patch("ralph.commands.run.AgentPool") as mock_pool_cls,
+    ):
+        mock_claude_cls.return_value = mock_agent
+        mock_codex_cls.return_value = type("MockCodex", (), {"is_available": lambda self: False})()
+        mock_pool_cls.return_value = mock_pool
+
+        result = runner.invoke(app, ["run", "--filter", "auth", "--max", "5"])
+
+    assert result.exit_code == 0
+    assert mock_agent.prompts
+    assert all("Spec file: specs/auth.spec.md" in prompt for prompt in mock_agent.prompts)
+    assert all("Spec file: specs/user.spec.md" not in prompt for prompt in mock_agent.prompts)
+
+
+def test_run_filter_resume_overrides_previous_current_spec(temp_project: Path) -> None:
+    """Resuming with --filter re-prioritizes to filtered candidates."""
+    runner.invoke(app, ["init"])
+    specs_dir = temp_project / "specs"
+    specs_dir.mkdir()
+    (specs_dir / "auth.spec.md").write_text("# Auth Spec\nImplement auth")
+    (specs_dir / "user.spec.md").write_text("# User Spec\nImplement users")
+
+    discovered = sorted(["specs/auth.spec.md", "specs/user.spec.md"])
+    state = ensure_state(discovered, temp_project)
+    user_index = next(i for i, spec in enumerate(state.specs) if spec.path == "specs/user.spec.md")
+    write_multi_state(
+        MultiSpecState(
+            version=state.version,
+            iteration=state.iteration,
+            status=state.status,
+            current_index=user_index,
+            specs=state.specs,
+        ),
+        temp_project,
+    )
+
+    from ralph.core.pool import AgentPool
+
+    mock_agent = RecordingMockAgent(temp_project)
+    mock_agent.responses = [{"status": "ROTATE", "output": "working", "changes": []}]
+    mock_pool = AgentPool([mock_agent])
+
+    with (
+        patch("ralph.commands.run.ClaudeAgent") as mock_claude_cls,
+        patch("ralph.commands.run.CodexAgent") as mock_codex_cls,
+        patch("ralph.commands.run.AgentPool") as mock_pool_cls,
+    ):
+        mock_claude_cls.return_value = mock_agent
+        mock_codex_cls.return_value = type("MockCodex", (), {"is_available": lambda self: False})()
+        mock_pool_cls.return_value = mock_pool
+
+        result = runner.invoke(app, ["run", "--filter", "auth", "--max", "1"])
+
+    assert result.exit_code == 3
+    assert mock_agent.prompts
+    assert "Spec file: specs/auth.spec.md" in mock_agent.prompts[0]
+    assert "Spec file: specs/user.spec.md" not in mock_agent.prompts[0]
+
+
+def test_run_filter_option_case_insensitive(temp_project: Path) -> None:
+    """Test --filter option is case-insensitive."""
+    runner.invoke(app, ["init"])
+
+    specs_dir = temp_project / "specs"
+    specs_dir.mkdir()
+
+    (specs_dir / "UserAuth.spec.md").write_text("# User Auth Spec\nImplement auth")
+
+    result = runner.invoke(app, ["run", "--filter", "userauth", "--debug-prompt"])
+
+    assert result.exit_code == 0
+    assert "User Auth Spec" in result.output
+
+
+def test_run_filter_no_match(temp_project: Path) -> None:
+    """Test --filter with no matching specs shows error."""
+    runner.invoke(app, ["init"])
+
+    specs_dir = temp_project / "specs"
+    specs_dir.mkdir()
+
+    (specs_dir / "auth.spec.md").write_text("# Auth Spec")
+    (specs_dir / "database.spec.md").write_text("# Database Spec")
+
+    result = runner.invoke(app, ["run", "--filter", "payment"])
+
+    assert result.exit_code == 1
+    assert "No specs match filter" in result.output
+    assert "payment" in result.output
+    # Should list available specs
+    assert "auth.spec.md" in result.output
+    assert "database.spec.md" in result.output
+
+
+def test_run_debug_prompt_outputs_prompt(project_with_prompt: Path) -> None:
+    """Test --debug-prompt outputs the constructed prompt."""
+    result = runner.invoke(app, ["run", "--debug-prompt"])
+
+    assert result.exit_code == 0
+    # Should contain the prompt template elements
+    assert "RALPH LOOP - ROTATION" in result.output
+    assert "YOUR GOAL" in result.output
+    assert "CURRENT STATE" in result.output
+    assert "GUARDRAILS" in result.output
+    assert "COMPLETION SIGNALS" in result.output
+
+
+def test_run_debug_prompt_with_filter(temp_project: Path) -> None:
+    """Test --debug-prompt with --filter uses correct spec."""
+    runner.invoke(app, ["init"])
+
+    specs_dir = temp_project / "specs"
+    specs_dir.mkdir()
+
+    (specs_dir / "first.spec.md").write_text("# First Spec\nFirst goal")
+    (specs_dir / "second.spec.md").write_text("# Second Spec\nSecond goal")
+
+    result = runner.invoke(app, ["run", "--filter", "second", "--debug-prompt"])
+
+    assert result.exit_code == 0
+    assert "Second goal" in result.output
+    assert "First goal" not in result.output
+
+
+def test_run_multiple_rotations_show_independent_durations(project_with_prompt: Path) -> None:
+    """Each rotation should display its own elapsed time."""
+
+    class AvailableClaude:
+        name = "Claude"
+
+        def is_available(self) -> bool:
+            return True
+
+    class UnavailableCodex:
+        name = "Codex"
+
+        def is_available(self) -> bool:
+            return False
+
+    def fake_run_loop(*args, **kwargs):
+        on_iteration_start = kwargs["on_iteration_start"]
+        on_iteration_end = kwargs["on_iteration_end"]
+
+        on_iteration_start(1, 10, 0, "Claude", "PROMPT.md")
+        on_iteration_end(
+            1,
+            IterationResult(
+                status=Status.ROTATE,
+                files_changed=[],
+                test_result=None,
+                claude_output="rotation 1",
+            ),
+            0,
+            "Claude",
+            "PROMPT.md",
+        )
+
+        on_iteration_start(2, 10, 0, "Claude", "PROMPT.md")
+        on_iteration_end(
+            2,
+            IterationResult(
+                status=Status.DONE,
+                files_changed=[],
+                test_result=None,
+                claude_output="rotation 2",
+            ),
+            1,
+            "Claude",
+            "PROMPT.md",
+        )
+
+        return LoopResult(exit_code=0, message="", iterations_run=2)
+
+    with (
+        patch("ralph.commands.run.ClaudeAgent", return_value=AvailableClaude()),
+        patch("ralph.commands.run.CodexAgent", return_value=UnavailableCodex()),
+        patch("ralph.commands.run.run_loop", side_effect=fake_run_loop),
+        patch(
+            "ralph.commands.run.time.time",
+            side_effect=[0.0, 10.0, 55.0, 60.0, 193.0, 200.0],
+        ),
+    ):
+        result = runner.invoke(app, ["run", "--max", "10"])
+
+    assert result.exit_code == 0
+    assert result.output.count("[ralph] Time:") == 2
+    assert "[ralph] Time: 45s" in result.output
+    assert "[ralph] Time: 2m 13s" in result.output

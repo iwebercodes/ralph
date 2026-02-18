@@ -838,12 +838,19 @@ class TestCrashHandling:
         assert statuses[0] == Status.ROTATE
         handoff_path = get_handoff_path("PROMPT.md", project_with_prompt)
         assert handoff_path.exists()
-        assert "Previous rotation crashed" in handoff_path.read_text(encoding="utf-8")
+        handoff = handoff_path.read_text(encoding="utf-8")
+        assert "Previous rotation crashed: empty output from agent" in handoff
+        assert "Exit code: 1" in handoff
+        assert "Error: ECONNRESET" in handoff
         assert len(agent.prompts) == 2
         assert "Previous rotation crashed" in agent.prompts[1]
 
         history_path = get_history_file(1, project_with_prompt, "PROMPT.md")
-        assert "CRASH DETECTED" in history_path.read_text(encoding="utf-8")
+        history = history_path.read_text(encoding="utf-8")
+        assert "CRASH DETECTED" in history
+        assert "Summary: empty output from agent" in history
+        assert "Exit Code: 1" in history
+        assert "Output Bytes: 0" in history
 
     def test_error_text_without_failure_does_not_trigger_crash(
         self, project_with_prompt: Path
@@ -948,6 +955,14 @@ class TestCrashHandling:
         assert handoff_path.exists()
         handoff = handoff_path.read_text(encoding="utf-8")
         assert "Previous rotation crashed: non-zero exit code (7)" in handoff
+        assert "Exit code: 7" in handoff
+        assert "Error: unexpected failure" in handoff
+
+        history_path = get_history_file(1, project_with_prompt, "PROMPT.md")
+        history = history_path.read_text(encoding="utf-8")
+        assert "CRASH DETECTED" in history
+        assert "Summary: non-zero exit code (7)" in history
+        assert "Exit Code: 7" in history
 
     def test_crashed_agent_stays_in_pool(self, project_with_prompt: Path) -> None:
         """Test that crashed agents remain in pool (vs exhausted agents which are removed)."""

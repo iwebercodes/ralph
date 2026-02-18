@@ -309,9 +309,6 @@ def ensure_state(
     for path, done_count, last_status, last_hash, modified_files, spec_modified in spec_infos:
         if spec_modified:
             done_count = 0
-        if spec_modified:
-            last_status = None
-            modified_files = False
         new_specs.append(
             SpecProgress(
                 path=path,

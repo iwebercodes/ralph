@@ -9,12 +9,20 @@ from pathlib import Path
 
 import typer
 
+from ralph.commands.global_flags import about_callback, version_callback
 from ralph.core.agent import Agent, ClaudeAgent, CodexAgent
 from ralph.core.loop import IterationResult, run_loop
 from ralph.core.pool import AgentPool
+from ralph.core.prompt import assemble_prompt
 from ralph.core.run_state import delete_run_state, is_pid_alive, read_run_state
-from ralph.core.specs import discover_specs, read_spec_content
-from ralph.core.state import is_initialized, read_state
+from ralph.core.specs import Spec, discover_specs, read_spec_content
+from ralph.core.state import (
+    get_handoff_path,
+    is_initialized,
+    read_guardrails,
+    read_handoff,
+    read_state,
+)
 from ralph.output.console import Console
 
 
@@ -27,11 +35,30 @@ def format_duration(seconds: float) -> str:
     return f"{secs}s"
 
 
+def _filter_specs(spec_filter: str | None, specs: list[Spec]) -> list[Spec]:
+    """Filter discovered specs by case-insensitive basename substring."""
+    if spec_filter is None:
+        return specs
+    needle = spec_filter.lower()
+    return [spec for spec in specs if needle in spec.path.name.lower()]
+
+
 def run(
-    max_iterations: int = typer.Option(20, "--max", "-m", help="Maximum number of iterations"),
-    test_cmd: str | None = typer.Option(
-        None, "--test-cmd", "-t", help="Command to run after each iteration"
+    version: bool = typer.Option(
+        False,
+        "--version",
+        is_eager=True,
+        hidden=True,
+        callback=version_callback,
     ),
+    about: bool = typer.Option(
+        False,
+        "--about",
+        is_eager=True,
+        hidden=True,
+        callback=about_callback,
+    ),
+    max_iterations: int = typer.Option(20, "--max", "-m", help="Maximum number of iterations"),
     agents: str | None = typer.Option(
         None, "--agents", "-a", help="Comma-separated agent names (e.g., 'claude' or 'codex')"
     ),
@@ -42,6 +69,14 @@ def run(
         False, "--no-timeout", help="Disable timeout entirely (run until completion)"
     ),
     no_color: bool = typer.Option(False, "--no-color", help="Disable colored output"),
+    filter_spec: str | None = typer.Option(
+        None, "--filter", help="Filter specs by substring match in filename"
+    ),
+    debug_prompt: bool = typer.Option(
+        False,
+        "--debug-prompt",
+        help="Output the fully constructed prompt to stdout instead of executing agents, then exit",
+    ),
 ) -> None:
     """Execute the Ralph loop until completion or max iterations."""
     root = Path.cwd()
@@ -65,6 +100,15 @@ See docs: docs/writing-prompts.md"""
         console.error("No spec files found", hint)
         raise typer.Exit(1)
 
+    specs = _filter_specs(filter_spec, specs)
+    if filter_spec is not None and not specs:
+        all_specs = discover_specs(root)
+        console.error(
+            f"No specs match filter: '{filter_spec}'",
+            f"Available specs: {', '.join(s.path.name for s in all_specs)}",
+        )
+        raise typer.Exit(1)
+
     for spec in specs:
         content = read_spec_content(spec.path)
         if not content:
@@ -84,6 +128,39 @@ See docs: docs/writing-prompts.md"""
             )
             raise typer.Exit(1)
         delete_run_state(root)
+
+    # Handle debug-prompt mode
+    if debug_prompt:
+        # Use the first spec (or only spec if filtered)
+        spec = specs[0]
+        spec_path = spec.rel_posix
+        spec_goal = read_spec_content(spec.path) or ""
+
+        # Read current state
+        state = read_state(root)
+        iteration = state.iteration + 1
+        done_count = state.done_count
+
+        # Read handoff and guardrails
+        handoff = read_handoff(root, spec_path)
+        guardrails = read_guardrails(root)
+        handoff_path = get_handoff_path(spec_path, root)
+
+        # Assemble the prompt
+        prompt = assemble_prompt(
+            iteration=iteration,
+            max_iter=max_iterations,
+            done_count=done_count,
+            goal=spec_goal,
+            handoff=handoff,
+            guardrails=guardrails,
+            spec_path=spec_path,
+            handoff_path=handoff_path.as_posix(),
+        )
+
+        # Output the prompt to stdout and exit
+        console.print(prompt)
+        raise typer.Exit(0)
 
     # Build agent pool from available agents
     all_agents: list[Agent] = [ClaudeAgent(), CodexAgent()]
@@ -144,11 +221,11 @@ After installing, verify with: claude --version or codex --version"""
     def handle_interrupt(signum: int, frame: object) -> None:
         nonlocal interrupted
         interrupted = True
-        typer.echo("\n\nInterrupted. State saved.")
+        console.print("\n\nInterrupted. State saved.")
         state = read_state(root)
-        typer.echo(f"\n  State: iteration {state.iteration} (interrupted)")
-        typer.echo("\nTo resume: ralph run")
-        typer.echo("To reset: ralph reset")
+        console.print(f"\n  State: iteration {state.iteration} (interrupted)")
+        console.print("\nTo resume: ralph run")
+        console.print("To reset: ralph reset")
         sys.exit(130)
 
     signal.signal(signal.SIGINT, handle_interrupt)
@@ -189,14 +266,6 @@ After installing, verify with: claude --version or codex --version"""
             duration,
         )
 
-        if result.test_result:
-            exit_code, _ = result.test_result
-            console.test_result(
-                test_cmd or "",
-                exit_code,
-                passed=(exit_code == 0),
-            )
-
         console.close_iteration()
 
     # Handle timeout options
@@ -204,12 +273,13 @@ After installing, verify with: claude --version or codex --version"""
 
     result = run_loop(
         max_iter=max_iterations,
-        test_cmd=test_cmd,
+        test_cmd=None,
         root=root,
         agent_pool=pool,
         on_iteration_start=on_iteration_start,
         on_iteration_end=on_iteration_end,
         timeout=effective_timeout,
+        spec_filter=filter_spec,
     )
 
     duration = time.time() - start_time

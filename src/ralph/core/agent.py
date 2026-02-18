@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import re
 import shutil
-import subprocess
+import subprocess  # nosec B404 - subprocess needed for agent execution
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -278,19 +278,37 @@ def _codex_runtime_error_text(error: str) -> str | None:
     runtime error anchor.
     """
     search_start = 0
+    user_block_found = False
     user_block = re.search(r"^user\s*$", error, re.MULTILINE)
     if user_block:
-        mcp_start = re.search(r"^mcp startup:.*$", error[user_block.end() :], re.MULTILINE)
-        if mcp_start:
+        user_block_found = True
+        search_start = user_block.end()
+        # Prompts can echo literal `mcp startup:` lines. Use the last boundary
+        # after the user block so prompt text cannot shadow the true runtime section.
+        mcp_matches = list(
+            re.finditer(r"^mcp startup:.*$", error[user_block.end() :], re.MULTILINE)
+        )
+        if mcp_matches:
+            mcp_start = mcp_matches[-1]
             mcp_line_start = user_block.end() + mcp_start.start()
             mcp_line_end = error.find("\n", mcp_line_start)
             search_start = len(error) if mcp_line_end == -1 else mcp_line_end + 1
+        else:
+            # Without an explicit runtime boundary, the remaining text is ambiguous
+            # and can still be echoed prompt content. Be conservative to avoid
+            # false-positive exhaustion removals.
+            return None
 
     anchor_patterns = [
         r"codex_api::endpoint::responses",
         r"^\d{4}-\d{2}-\d{2}T[^\n]*\bERROR\b",
-        r"^ERROR:",
     ]
+    # Bare `ERROR:` lines are ambiguous whenever a user block is present because
+    # echoed prompt text can contain lines starting with `ERROR:`.
+    # Only treat `ERROR:` as a runtime anchor when there is no echoed user block.
+    if not user_block_found:
+        anchor_patterns.append(r"^ERROR:")
+
     start_index: int | None = None
     search_text = error[search_start:]
     for pattern in anchor_patterns:
@@ -347,7 +365,7 @@ def _invoke_command(
     """Invoke a command with optional streaming to a file."""
     try:
         if output_file is None:
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603 - controlled agent commands
                 cmd,
                 capture_output=True,
                 text=True,
@@ -406,7 +424,7 @@ def _invoke_with_streaming(
                 log_file.flush()
 
     with output_file.open("a", encoding="utf-8") as log_file:
-        process = subprocess.Popen(
+        process = subprocess.Popen(  # nosec B603 - controlled agent commands
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,

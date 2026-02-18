@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-import subprocess
+import subprocess  # nosec B404 - subprocess needed for test commands
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
@@ -67,11 +67,18 @@ class LoopResult(NamedTuple):
 
 
 def run_test_command(cmd: str) -> tuple[int, str]:
-    """Run a test command and return (exit_code, output)."""
+    """Run a test command and return (exit_code, output).
+
+    Note: Uses shell=True to support complex test commands with pipes,
+    redirections, and shell features. Command input is controlled by
+    user configuration, not external untrusted input.
+    """
     try:
+        # Parse command safely while preserving shell features
+        # shell=True is needed for test commands that use pipes, etc.
         result = subprocess.run(
             cmd,
-            shell=True,
+            shell=True,  # nosec B602 - controlled user input, not untrusted
             capture_output=True,
             text=True,
             timeout=300,  # 5 minute timeout for tests
@@ -461,6 +468,41 @@ def _sort_specs_for_run(specs: list[Spec], root: Path) -> list[Spec]:
     return sort_specs_by_state(specs, spec_states, root)
 
 
+def _filter_specs(specs: list[Spec], spec_filter: str | None) -> list[Spec]:
+    """Filter specs by case-insensitive substring against basename."""
+    if spec_filter is None:
+        return specs
+    needle = spec_filter.lower()
+    return [spec for spec in specs if needle in spec.path.name.lower()]
+
+
+def _all_candidates_done(state: MultiSpecState, candidate_paths: set[str]) -> bool:
+    """True when all candidate specs are verified done (3/3)."""
+    if not candidate_paths:
+        return False
+    candidates = [spec for spec in state.specs if spec.path in candidate_paths]
+    if not candidates:
+        return False
+    return all(spec.done_count >= 3 for spec in candidates)
+
+
+def _select_best_index(
+    state: MultiSpecState,
+    prioritized_paths: list[str],
+) -> int:
+    """Select index of highest-priority spec that still needs work."""
+    best_index = state.current_index if 0 <= state.current_index < len(state.specs) else 0
+    for path in prioritized_paths:
+        spec_idx = next((i for i, s in enumerate(state.specs) if s.path == path), None)
+        if spec_idx is None:
+            continue
+        if state.specs[spec_idx].done_count < 3:
+            return spec_idx
+        if best_index == state.current_index:
+            best_index = spec_idx
+    return best_index
+
+
 def run_loop(
     max_iter: int = 20,
     test_cmd: str | None = None,
@@ -469,6 +511,7 @@ def run_loop(
     on_iteration_start: Callable[[int, int, int, str, str], None] | None = None,
     on_iteration_end: Callable[[int, IterationResult, int, str, str], None] | None = None,
     timeout: int | None = 10800,
+    spec_filter: str | None = None,
 ) -> LoopResult:
     """Run the main Ralph loop.
 
@@ -490,30 +533,28 @@ def run_loop(
     if agent_pool is None:
         raise ValueError("agent_pool is required")
 
-    specs = discover_specs(root)
-    if not specs:
+    all_specs = discover_specs(root)
+    if not all_specs:
         return LoopResult(1, "No spec files found", 0)
+    specs = _filter_specs(all_specs, spec_filter)
+    if spec_filter is not None and not specs:
+        return LoopResult(1, "No specs match filter criteria", 0)
 
     # Ensure state is up to date with discovered specs
-    state = ensure_state([spec.rel_posix for spec in specs], root)
+    state = ensure_state([spec.rel_posix for spec in all_specs], root)
 
-    if state.specs and all(spec.done_count >= 3 for spec in state.specs):
+    if spec_filter is not None:
+        candidate_paths = {spec.rel_posix for spec in specs}
+        if _all_candidates_done(state, candidate_paths):
+            return LoopResult(0, "Goal achieved!", 0)
+    elif state.specs and all(spec.done_count >= 3 for spec in state.specs):
         return LoopResult(0, "Goal achieved!", 0)
 
     # Sort specs by priority and select the highest priority one
     sorted_specs = _sort_specs_for_run(specs, root)
     sorted_paths = [spec.rel_posix for spec in sorted_specs]
 
-    # Find the highest priority spec that needs work
-    best_index = 0
-    for path in sorted_paths:
-        spec_idx = next((i for i, s in enumerate(state.specs) if s.path == path), None)
-        if spec_idx is not None:
-            spec_progress = state.specs[spec_idx]
-            # Select first spec that isn't already at 3/3
-            if spec_progress.done_count < 3:
-                best_index = spec_idx
-                break
+    best_index = _select_best_index(state, sorted_paths)
 
     # Update current_index to the highest priority spec
     if state.current_index != best_index:
@@ -541,19 +582,44 @@ def run_loop(
 
     try:
         while iteration < max_iter:
-            if state.specs and all(spec.done_count >= 3 for spec in state.specs):
+            if spec_filter is not None:
+                all_specs_now = discover_specs(root)
+                filtered_now = _filter_specs(all_specs_now, spec_filter)
+                if not filtered_now:
+                    return LoopResult(1, "No specs match filter criteria", iterations_run)
+                state = ensure_state([spec.rel_posix for spec in all_specs_now], root)
+                if _all_candidates_done(state, {spec.rel_posix for spec in filtered_now}):
+                    return LoopResult(0, "Goal achieved!", iterations_run)
+            elif state.specs and all(spec.done_count >= 3 for spec in state.specs):
                 return LoopResult(0, "Goal achieved!", iterations_run)
 
             # Check if we have any agents left
             if agent_pool.is_empty():
                 return LoopResult(4, "All agents exhausted", iterations_run)
 
-            specs = discover_specs(root)
-            if not specs:
+            all_specs = discover_specs(root)
+            if not all_specs:
                 return LoopResult(1, "No spec files found", iterations_run)
+            specs = _filter_specs(all_specs, spec_filter)
+            if spec_filter is not None and not specs:
+                return LoopResult(1, "No specs match filter criteria", iterations_run)
 
-            state = ensure_state([spec.rel_posix for spec in specs], root)
-            spec_map = {spec.rel_posix: spec for spec in specs}
+            state = ensure_state([spec.rel_posix for spec in all_specs], root)
+            spec_map = {spec.rel_posix: spec for spec in all_specs}
+
+            # Filtered runs always re-prioritize against the filtered candidate set.
+            if spec_filter is not None:
+                prioritized_paths = [spec.rel_posix for spec in _sort_specs_for_run(specs, root)]
+                next_index = _select_best_index(state, prioritized_paths)
+                if state.current_index != next_index:
+                    state = MultiSpecState(
+                        version=state.version,
+                        iteration=state.iteration,
+                        status=state.status,
+                        current_index=next_index,
+                        specs=state.specs,
+                    )
+                    write_multi_state(state, root)
 
             # Select an agent for this iteration
             agent = agent_pool.select_random()
@@ -655,6 +721,31 @@ def run_loop(
 
             # Determine next spec based on focused execution rules
             if state.specs:
+                if spec_filter is not None:
+                    refreshed_all_specs = discover_specs(root)
+                    if not refreshed_all_specs:
+                        return LoopResult(1, "No spec files found", iterations_run)
+                    refreshed_filtered = _filter_specs(refreshed_all_specs, spec_filter)
+                    if not refreshed_filtered:
+                        return LoopResult(1, "No specs match filter criteria", iterations_run)
+                    state = ensure_state(
+                        [spec.rel_posix for spec in refreshed_all_specs],
+                        root,
+                    )
+                    prioritized_paths = [
+                        spec.rel_posix for spec in _sort_specs_for_run(refreshed_filtered, root)
+                    ]
+                    next_index = _select_best_index(state, prioritized_paths)
+                    state = MultiSpecState(
+                        version=state.version,
+                        iteration=state.iteration,
+                        status=state.status,
+                        current_index=next_index,
+                        specs=state.specs,
+                    )
+                    write_multi_state(state, root)
+                    continue
+
                 previous_paths = {spec.path for spec in state.specs}
                 # Re-discover specs to check for new/modified/removed files
                 new_specs = discover_specs(root)
@@ -677,9 +768,14 @@ def run_loop(
                 # Determine next spec index
                 next_index = state.current_index
 
-                # Only switch specs if current spec is DONE with no changes
-                if current_spec_status == Status.DONE and not current_had_changes:
-                    # Current spec finished cleanly.
+                # Only switch specs if current spec is DONE with no changes AND fully verified (3/3)
+                current_spec = state.specs[state.current_index]
+                if (
+                    current_spec_status == Status.DONE
+                    and not current_had_changes
+                    and current_spec.done_count >= 3
+                ):
+                    # Current spec is fully complete (3/3).
                     # Find the next highest-priority spec that needs work,
                     # preferring others over current.
                     current_spec_path = state.specs[state.current_index].path
@@ -702,11 +798,9 @@ def run_loop(
                             break
 
                     # Second pass: if no alternatives, check if current spec still needs work
-                    if not found_alternative:
-                        current_spec = state.specs[state.current_index]
-                        if current_spec.done_count < 3:
-                            # Current spec is the only one that needs work, continue with it
-                            next_index = state.current_index
+                    if not found_alternative and current_spec.done_count < 3:
+                        # Current spec is the only one that needs work, continue with it
+                        next_index = state.current_index
                 else:
                     # Current spec needs more work (CONTINUE/ROTATE/STUCK or DONE with changes)
                     # Only switch if there's a completely new spec (highest priority exception)

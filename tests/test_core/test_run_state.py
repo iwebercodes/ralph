@@ -7,7 +7,11 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
+import pytest
+
+import ralph.core.run_state as run_state_module
 from ralph.core.run_state import (
     RunState,
     delete_run_state,
@@ -67,3 +71,48 @@ def test_update_run_state(initialized_project: Path) -> None:
     assert updated.agent == "Claude"
     assert updated.agent_started_at == "2025-01-19T14:40:00+00:00"
     assert updated.pid == state.pid
+
+
+def _fake_windows_ctypes(handle: int, exit_code: int) -> SimpleNamespace:
+    class DummyULong:
+        def __init__(self) -> None:
+            self.value = 0
+
+    def open_process(_access: int, _inherit: bool, _pid: int) -> int:
+        return handle
+
+    def get_exit_code_process(_handle: int, exit_code_ptr: object) -> int:
+        # ctypes.byref(c_ulong()) stores the original object on _obj
+        exit_code_ptr._obj.value = exit_code
+        return 1
+
+    def close_handle(_handle: int) -> int:
+        return 1
+
+    fake_kernel32 = SimpleNamespace(
+        OpenProcess=open_process,
+        GetExitCodeProcess=get_exit_code_process,
+        CloseHandle=close_handle,
+    )
+
+    return SimpleNamespace(
+        windll=SimpleNamespace(kernel32=fake_kernel32),
+        c_ulong=DummyULong,
+        byref=lambda value: SimpleNamespace(_obj=value),
+    )
+
+
+def test_is_pid_alive_windows_still_active(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Windows branch returns True for STILL_ACTIVE exit code."""
+    monkeypatch.setitem(sys.modules, "ctypes", _fake_windows_ctypes(handle=123, exit_code=259))
+    monkeypatch.setattr(run_state_module.os, "name", "nt", raising=False)
+
+    assert is_pid_alive(42) is True
+
+
+def test_is_pid_alive_windows_exited_process(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Windows branch returns False when process has exited."""
+    monkeypatch.setitem(sys.modules, "ctypes", _fake_windows_ctypes(handle=456, exit_code=1))
+    monkeypatch.setattr(run_state_module.os, "name", "nt", raising=False)
+
+    assert is_pid_alive(42) is False

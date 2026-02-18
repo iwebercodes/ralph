@@ -43,11 +43,16 @@ COMMANDS
       Initialize Ralph in the current directory.
       --force: Overwrite existing .ralph/ directory
 
-  ralph run [--max N] [--test-cmd "..."] [--agents NAMES] [--no-color]
+  ralph run [--max N] [--agents NAMES] [--timeout SECS] [--no-timeout]
+            [--no-color] [--filter SUBSTR] [--debug-prompt]
       Execute rotations until the goal is complete.
       --max N: Maximum iterations (default: 20)
-      --test-cmd: Command to run after each iteration
       --agents: Comma-separated agent names to use (e.g., "claude,codex")
+      --timeout: Timeout per rotation in seconds (default: 10800/3 hours)
+      --no-timeout: Disable timeout entirely
+      --no-color: Disable colored output
+      --filter: Filter specs by substring match in filename
+      --debug-prompt: Output constructed prompt instead of executing
 
   ralph inspect [--follow] [--json]
       Inspect a running Ralph session.
@@ -58,10 +63,13 @@ COMMANDS
       Show current state without running.
       --json: Output as JSON
 
-  ralph reset [--keep-guardrails] [--keep-history]
-      Clear state and start fresh.
-      --keep-guardrails: Preserve guardrails.md
-      --keep-history: Preserve history/ directory
+  ralph reset [--reset-guardrails] [--reset-history] [--reset-counter]
+              [--reset-handoffs]
+      Reset iteration counter to start a new rotation cycle.
+      --reset-guardrails: Reset guardrails.md to template
+      --reset-history: Clear history/ directory
+      --reset-counter: Reset verification counter (done_count) to 0
+      --reset-handoffs: Reset all handoff files to template
 
   ralph history [N] [--list] [--tail N]
       View logs from previous rotations.

@@ -8,7 +8,15 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from ralph.cli import app
-from ralph.core.state import Status, write_done_count, write_iteration, write_status
+from ralph.core.state import (
+    MultiSpecState,
+    Status,
+    ensure_state,
+    write_done_count,
+    write_iteration,
+    write_multi_state,
+    write_status,
+)
 
 runner = CliRunner()
 
@@ -63,9 +71,10 @@ def test_status_json_output(initialized_project: Path) -> None:
 
     assert result.exit_code == 0
     data = json.loads(result.output)
-    assert data["initialized"] is True
     assert data["iteration"] == 3
     assert data["status"] == "ROTATE"
+    assert "goal" in data
+    assert "specs" in data
 
 
 def test_status_json_not_initialized(temp_project: Path) -> None:
@@ -74,4 +83,30 @@ def test_status_json_not_initialized(temp_project: Path) -> None:
 
     assert result.exit_code == 1
     data = json.loads(result.output)
-    assert data["initialized"] is False
+    assert data["error"] == "Ralph not initialized"
+
+
+def test_status_goal_preview_uses_prompt_md_not_current_spec(temp_project: Path) -> None:
+    """Goal preview should come from PROMPT.md even when current spec differs."""
+    runner.invoke(app, ["init"])
+    (temp_project / "PROMPT.md").write_text("# Goal\n\nPrompt goal line\n")
+    specs_dir = temp_project / "specs"
+    specs_dir.mkdir()
+    (specs_dir / "user.spec.md").write_text("# Goal\n\nUser spec line\n")
+
+    state = ensure_state(["PROMPT.md", "specs/user.spec.md"], temp_project)
+    write_multi_state(
+        MultiSpecState(
+            version=state.version,
+            iteration=state.iteration,
+            status=state.status,
+            current_index=1,
+            specs=state.specs,
+        ),
+        temp_project,
+    )
+
+    result = runner.invoke(app, ["status", "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["goal"] == "Prompt goal line"

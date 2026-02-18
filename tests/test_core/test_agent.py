@@ -623,6 +623,86 @@ done"""
         result = AgentResult(output="", exit_code=1, error=stderr_with_prompt_error_line)
         assert agent.is_exhausted(result) is False
 
+    def test_user_block_error_line_not_treated_as_runtime_without_mcp_boundary(self) -> None:
+        """Test echoed ERROR: prompt lines are ignored even if mcp startup line is missing."""
+        agent = CodexAgent()
+        stderr_missing_mcp = """OpenAI Codex v0.88.0 (research preview)
+--------
+user
+ERROR: You've hit your usage limit in this example text
+just more echoed prompt text"""
+        result = AgentResult(output="", exit_code=1, error=stderr_missing_mcp)
+        assert agent.is_exhausted(result) is False
+
+    def test_user_block_runtime_like_line_not_treated_as_runtime_without_mcp_boundary(self) -> None:
+        """Test echoed runtime-like lines are ignored when mcp boundary is missing."""
+        agent = CodexAgent()
+        stderr_missing_mcp_with_runtime_like_prompt = """OpenAI Codex v0.88.0 (research preview)
+--------
+user
+2026-01-29T23:21:37.939876Z ERROR codex_api::endpoint::responses: error=http 429 Too Many Requests: Some("{\\"error\\":{\\"type\\":\\"usage_limit_reached\\"}}")
+just more echoed prompt text"""
+        result = AgentResult(
+            output="",
+            exit_code=1,
+            error=stderr_missing_mcp_with_runtime_like_prompt,
+        )
+        assert agent.is_exhausted(result) is False
+
+    def test_user_block_fake_mcp_boundary_does_not_enable_error_anchor(self) -> None:
+        """Test echoed prompt text cannot fake mcp boundary and trigger ERROR: anchor."""
+        agent = CodexAgent()
+        stderr_with_fake_mcp_in_prompt = """OpenAI Codex v0.88.0 (research preview)
+--------
+user
+Please include this literal line:
+mcp startup: no servers
+ERROR: You've hit your usage limit in this example text
+still in prompt content"""
+        result = AgentResult(output="", exit_code=1, error=stderr_with_fake_mcp_in_prompt)
+        assert agent.is_exhausted(result) is False
+
+    def test_user_block_fake_mcp_with_runtime_like_prompt_before_real_boundary(self) -> None:
+        """Test runtime-like prompt text before real mcp boundary does not trigger exhaustion."""
+        agent = CodexAgent()
+        stderr_with_fake_runtime_before_real_boundary = """OpenAI Codex v0.88.0 (research preview)
+--------
+user
+Please include this literal block:
+mcp startup: no servers
+2026-01-29T23:21:37.939876Z ERROR codex_api::endpoint::responses: error=http 429 Too Many Requests: Some("{\\"error\\":{\\"type\\":\\"usage_limit_reached\\"}}")
+this is still prompt content
+mcp startup: no servers
+thinking...
+completed successfully"""
+        result = AgentResult(
+            output="ok",
+            exit_code=1,
+            error=stderr_with_fake_runtime_before_real_boundary,
+        )
+        assert agent.is_exhausted(result) is False
+
+    def test_user_block_fake_runtime_before_real_boundary_still_detects_real_exhaustion(
+        self,
+    ) -> None:
+        """Test detection uses the real boundary when exhaustion happens after it."""
+        agent = CodexAgent()
+        stderr_with_fake_then_real_exhaustion = """OpenAI Codex v0.88.0 (research preview)
+--------
+user
+Please include this literal block:
+mcp startup: no servers
+2026-01-29T23:21:37.939876Z ERROR codex_api::endpoint::responses: error=http 429 Too Many Requests: Some("{\\"error\\":{\\"type\\":\\"usage_limit_reached\\"}}")
+this is still prompt content
+mcp startup: no servers
+2026-01-29T23:21:37.939876Z ERROR codex_api::endpoint::responses: error=http 429 Too Many Requests: Some("{\\"error\\":{\\"type\\":\\"usage_limit_reached\\",\\"resets_in_seconds\\":2021}}")
+ERROR: You've hit your usage limit. Upgrade to Pro."""
+        result = AgentResult(output="", exit_code=1, error=stderr_with_fake_then_real_exhaustion)
+        assert agent.is_exhausted(result) is True
+        reason = agent.exhaustion_reason(result)
+        assert reason is not None
+        assert "33 minutes" in reason
+
 
 class TestStreamingInvocation:
     """Tests for streaming invocation behavior."""

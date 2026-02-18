@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable
+from typing import Any
 
 from ralph.core.state import Status
 from ralph.output.colors import ColorContext
@@ -429,6 +430,10 @@ class Console:
                 complete_mark = " [COMPLETE]" if is_complete else ""
                 self._print(f"[ralph] {rot_num}. {status} ({files_str}){complete_mark}")
 
+    def render_history_rotation(self, rotation: int, content: str) -> str:
+        """Return formatted single-rotation history output."""
+        return f"Ralph History - Rotation {rotation}\n" + ("\u2501" * 52) + f"\n{content}"
+
     def error(self, message: str, hint: str | None = None) -> None:
         """Print an error message with optional hint."""
         self._print(self._colors.red(f"Error: {message}"))
@@ -447,3 +452,36 @@ class Console:
     def success(self, message: str) -> None:
         """Print a success message."""
         self._print(self._colors.green(message))
+
+    def inspect_not_running(self) -> None:
+        """Print inspect output when Ralph is not running."""
+        self._print("Not running")
+
+    def inspect_running(
+        self,
+        pid: int,
+        started_display: str,
+        iteration: int,
+        max_iterations: int,
+        status: str,
+        agent: str,
+        agent_display: str,
+    ) -> None:
+        """Print inspect output when Ralph is running."""
+        self._print(f"Ralph is running (PID {pid})\n")
+        self._print(f"Started:     {started_display}")
+        self._print(f"Iteration:   {iteration}/{max_iterations}")
+        self._print(f"Status:      {status}")
+        self._print(f"Agent:       {agent}")
+        self._print(f"Running for: {agent_display}\n")
+        self._print("Run `ralph inspect --follow` to tail agent output.")
+
+    def print(self, message: str = "") -> None:
+        """Print a message to stdout (for general output)."""
+        self._print(message)
+
+    def json(self, data: dict[str, Any]) -> None:
+        """Print JSON data to stdout."""
+        import json
+
+        self._print(json.dumps(data, indent=2))

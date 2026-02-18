@@ -50,14 +50,16 @@ def test_about_contains_prompt_md() -> None:
 
 
 def test_about_contains_options() -> None:
-    """Output mentions key options like --max, --test-cmd."""
+    """Output mentions key options like --max, --filter, --debug-prompt."""
     result = runner.invoke(app, ["--about"])
 
     assert "--max" in result.output
-    assert "--test-cmd" in result.output
+    assert "--filter" in result.output
+    assert "--debug-prompt" in result.output
     assert "--force" in result.output
     assert "--json" in result.output
-    assert "--keep-guardrails" in result.output
+    assert "--reset-guardrails" in result.output
+    assert "--reset-history" in result.output
 
 
 def test_about_is_substantial() -> None:
@@ -126,3 +128,11 @@ def test_subcommands_still_work() -> None:
 
     assert result.exit_code == 0
     assert "Initialize Ralph" in result.output
+
+
+def test_about_works_in_subcommand_context() -> None:
+    """--about should exit before executing subcommand logic."""
+    result = runner.invoke(app, ["status", "--about"])
+
+    assert result.exit_code == 0
+    assert "RALPH - Autonomous Development Supervisor" in result.output

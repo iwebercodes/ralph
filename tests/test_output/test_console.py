@@ -71,6 +71,14 @@ class TestConsole:
         output = capsys.readouterr().out
         assert "It worked!" in output
 
+    def test_render_history_rotation(self) -> None:
+        """Single-rotation history rendering uses the expected header format."""
+        console = Console(no_color=True)
+        rendered = console.render_history_rotation(7, "line a\nline b")
+        assert rendered.startswith("Ralph History - Rotation 7\n")
+        assert "━" * 52 in rendered
+        assert rendered.endswith("line a\nline b")
+
     def test_verification_circles(self) -> None:
         """Test verification circles formatting."""
         console = Console(no_color=True)
@@ -163,6 +171,25 @@ class TestConsole:
         output = capsys.readouterr().out
         assert "Result: DONE" in output
         assert "Time: 2m 13s" in output
+
+    def test_rotation_complete_non_tty_duration_ordering(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Time line appears after files and before removals/verification in non-TTY."""
+        console = Console(no_color=True)
+        console.rotation_complete(
+            Status.DONE,
+            ["file1.py"],
+            1,
+            agent_removals=(("Codex", "rate limit"),),
+            duration=133.0,
+        )
+        output = capsys.readouterr().out
+        files_idx = output.index("Result: DONE (1 file changed)")
+        time_idx = output.index("Time: 2m 13s")
+        agent_idx = output.index("Agent removed: Codex (rate limit)")
+        verify_idx = output.index("Verification: 1/3 [●○○]")
+        assert files_idx < time_idx < agent_idx < verify_idx
 
     def test_rotation_complete_no_changes(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Test rotation complete with no changes."""
@@ -374,6 +401,26 @@ class TestConsoleTTY:
         assert "ROTATE" in output
         assert "2 files changed" in output
         assert "Time:         45s" in output
+
+    def test_rotation_complete_tty_duration_ordering(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Time line appears after files and before removals/verification in TTY."""
+        console = Console(no_color=True)
+        console._is_tty = True
+        console.rotation_complete(
+            Status.DONE,
+            ["file1.py"],
+            1,
+            agent_removals=(("Codex", "rate limit"),),
+            duration=133.0,
+        )
+        output = capsys.readouterr().out
+        files_idx = output.index("Files:        1 file changed")
+        time_idx = output.index("Time:         2m 13s")
+        agent_idx = output.index("Agent:        Codex removed (rate limit)")
+        verify_idx = output.index("Verification: 1/3 [●○○]")
+        assert files_idx < time_idx < agent_idx < verify_idx
 
     def test_rotation_complete_tty_done_complete(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Test rotation complete with DONE status at 3/3 for TTY."""

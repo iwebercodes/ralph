@@ -129,19 +129,19 @@ def sort_specs_by_state(
 
 
 def spec_hash(rel_posix: str) -> str:
-    """Short hash for a spec path using forward slashes."""
+    """Short hash for a spec path using forward slashes (not for security)."""
     normalized = PurePosixPath(rel_posix.replace("\\", "/")).as_posix()
-    digest = hashlib.sha1(normalized.encode("utf-8")).hexdigest()
+    digest = hashlib.sha1(normalized.encode("utf-8"), usedforsecurity=False).hexdigest()  # nosec B324
     return digest[:6]
 
 
 def spec_content_hash(path: Path) -> str | None:
-    """Return a sha1 hash of the spec content, or None if missing."""
+    """Return a sha1 hash of the spec content, or None if missing (not for security)."""
     try:
         content = path.read_bytes()
     except FileNotFoundError:
         return None
-    return hashlib.sha1(content).hexdigest()
+    return hashlib.sha1(content, usedforsecurity=False).hexdigest()  # nosec B324
 
 
 def is_prompt_path(rel_posix: str) -> bool:

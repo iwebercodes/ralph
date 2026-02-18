@@ -12,6 +12,7 @@ from ralph.commands.reset import reset
 from ralph.commands.run import run
 from ralph.commands.status import status
 from ralph.output.about import get_about_text
+from ralph.output.console import Console
 
 
 def _main_callback(
@@ -19,7 +20,6 @@ def _main_callback(
     version: bool = typer.Option(
         False,
         "--version",
-        "-V",
         help="Show version number and exit",
     ),
     about: bool = typer.Option(
@@ -29,15 +29,16 @@ def _main_callback(
     ),
 ) -> None:
     """Main callback to handle --version and --about flags."""
+    console = Console()
     if version:
-        typer.echo(f"ralph {__version__}")
+        console.print(f"ralph {__version__}")
         raise typer.Exit(0)
     if about:
-        typer.echo(get_about_text())
+        console.print(get_about_text())
         raise typer.Exit(0)
     # If no subcommand and no --version/--about, show help
     if ctx.invoked_subcommand is None:
-        typer.echo(ctx.get_help())
+        console.print(ctx.get_help())
         raise typer.Exit(0)
 
 
@@ -46,6 +47,7 @@ app = typer.Typer(
     help="Autonomous development loop with context rotation",
     invoke_without_command=True,
     callback=_main_callback,
+    add_completion=False,
 )
 
 app.command()(init)

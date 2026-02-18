@@ -32,6 +32,14 @@ def test_inspect_not_running(initialized_project: Path) -> None:
     assert "not running" in result.output.lower()
 
 
+def test_inspect_not_running_json(initialized_project: Path) -> None:
+    """Inspect JSON output for not running state."""
+    result = runner.invoke(app, ["inspect", "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data == {"running": False}
+
+
 def test_inspect_running(initialized_project: Path) -> None:
     """Inspect reports running with details."""
     state = RunState(
@@ -68,7 +76,11 @@ def test_inspect_json(initialized_project: Path) -> None:
     data = json.loads(result.output)
     assert data["running"] is True
     assert data["pid"] == os.getpid()
-    assert data["agent"] == "Claude"
+    assert data["iteration"] == 1
+    assert data["max_iterations"] == 20
+    assert data["current_agent"] == "claude"
+    assert "status" in data
+    assert "runtime" in data
 
 
 def test_inspect_stale_pid(initialized_project: Path) -> None:

@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import pydoc
 import re
+import sys
 from pathlib import Path
 
 import typer
 
+from ralph.commands.global_flags import about_callback, version_callback
 from ralph.core.specs import discover_specs
 from ralph.core.state import ensure_state, get_history_dir, is_initialized
 from ralph.output.console import Console
@@ -22,7 +25,7 @@ def parse_log_summary(content: str) -> tuple[str | None, str | None, int]:
     files_changed = 0
 
     # Look for timestamp in header
-    timestamp_match = re.search(r"RALPH ROTATION \d+ - (\S+)", content)
+    timestamp_match = re.search(r"RALPH ROTATION \d+(?: \[[^\]]+\])? - (\S+)", content)
     if timestamp_match:
         timestamp = timestamp_match.group(1)
 
@@ -40,6 +43,20 @@ def parse_log_summary(content: str) -> tuple[str | None, str | None, int]:
 
 
 def history(
+    version: bool = typer.Option(
+        False,
+        "--version",
+        is_eager=True,
+        hidden=True,
+        callback=version_callback,
+    ),
+    about: bool = typer.Option(
+        False,
+        "--about",
+        is_eager=True,
+        hidden=True,
+        callback=about_callback,
+    ),
     rotation: int | None = typer.Argument(None, help="Rotation number to view"),
     list_all: bool = typer.Option(False, "--list", "-l", help="List all rotations with summary"),
     tail: int | None = typer.Option(None, "--tail", "-n", help="Show last N lines of log"),
@@ -110,10 +127,12 @@ def history(
 
     content = log_file.read_text()
 
-    if tail:
+    if tail is not None:
         lines = content.splitlines()
         content = "\n".join(lines[-tail:])
 
-    typer.echo(f"Ralph History - Rotation {rotation}")
-    typer.echo("\u2501" * 52)
-    typer.echo(content)
+    rendered = console.render_history_rotation(rotation, content)
+    if len(rendered.splitlines()) > 120 and sys.stdout.isatty():
+        pydoc.pager(rendered)
+    else:
+        console.print(rendered)

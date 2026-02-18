@@ -7,6 +7,7 @@ from pathlib import Path
 
 import typer
 
+from ralph.commands.global_flags import about_callback, version_callback
 from ralph.core.state import (
     GUARDRAILS_TEMPLATE,
     HANDOFF_DIR,
@@ -28,6 +29,20 @@ from ralph.output.console import Console
 
 
 def init(
+    version: bool = typer.Option(
+        False,
+        "--version",
+        is_eager=True,
+        hidden=True,
+        callback=version_callback,
+    ),
+    about: bool = typer.Option(
+        False,
+        "--about",
+        is_eager=True,
+        hidden=True,
+        callback=about_callback,
+    ),
     force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing .ralph/ directory"),
 ) -> None:
     """Initialize Ralph in the current directory."""
@@ -71,13 +86,13 @@ def init(
         created_prompt = True
 
     if force:
-        typer.echo("Reinitialized Ralph in .ralph/")
+        console.print("Reinitialized Ralph in .ralph/")
     else:
-        typer.echo("Initialized Ralph in .ralph/")
+        console.print("Initialized Ralph in .ralph/")
 
     if created_prompt:
-        typer.echo("Created PROMPT.md template")
+        console.print("Created PROMPT.md template")
 
-    typer.echo("\nNext steps:")
-    typer.echo("  1. Edit PROMPT.md with your goal")
-    typer.echo("  2. Run: ralph run")
+    console.print("\nNext steps:")
+    console.print("  1. Edit PROMPT.md with your goal")
+    console.print("  2. Run: ralph run")

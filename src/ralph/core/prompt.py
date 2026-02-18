@@ -12,11 +12,15 @@ where the last left off.
 
 Spec file: {spec_path}
 
+---
 {goal}
+---
 
 ## CURRENT STATE (from previous rotation)
 
+---
 {handoff}
+---
 
 ## YOUR INSTRUCTIONS
 
@@ -31,7 +35,9 @@ Spec file: {spec_path}
 Lessons from previous rotations. Follow these strictly - they exist because earlier
 rotations learned them the hard way.
 
+---
 {guardrails}
+---
 
 ### Updating Guardrails
 
@@ -75,11 +81,15 @@ the work is actually complete.
 
 Spec file: {spec_path}
 
+---
 {goal}
+---
 
 ## CLAIMED STATE (from previous rotation - DO NOT TRUST BLINDLY)
 
+---
 {handoff}
+---
 
 ## YOUR INSTRUCTIONS
 
@@ -92,9 +102,10 @@ Spec file: {spec_path}
 3. **Check Every Criterion**: Go through current spec {spec_path} success criteria one by one.
 4. **If Anything Is Wrong**: Fix it, update the handoff for this spec,
    and signal CONTINUE (not DONE). Handoff file is ({handoff_path}).
-5. **If Everything Passes**: Update the handoff for this spec confirming your verification,
+5. **If the automated tests are missing or are not aligned with the spec**: Fix the automated tests.
+6. **If Everything Passes**: Update the handoff for this spec confirming your verification,
    signal DONE. Handoff file is ({handoff_path}).
-6. **Clean Up**: Before finishing, clean up temporary files and/or folder you've created.
+7. **Clean Up**: Before finishing, clean up temporary files and/or folder you've created.
    Especially temporary scripts used for verification. But also artifacts like
    screenshots or tool use reports.
 
@@ -102,7 +113,9 @@ Spec file: {spec_path}
 
 Lessons from previous rotations. Follow these strictly.
 
+---
 {guardrails}
+---
 
 ### Updating Guardrails
 
@@ -132,10 +145,13 @@ Write ONE of these to .ralph/status (the folder and the file exist already):
 - DO NOT rubber-stamp the previous rotation's work
 - Verification must be independent and thorough
 - Finding problems is good - that's what review is for
+- Verify the logic of automated tests. If they are rock-solid, don't double test what they test
+  (run them nevertheless). Focus on edge-cases and gaps they could have missed instead.
 - Only signal DONE if you would stake your reputation on it
 - NEVER modify spec files (PROMPT.md, *.spec.md in folders "specs" and ".ralph/specs")
   unless the spec explicitly asks you to
-- ALWAYS clean up temporary files and folders you created for testing or for experiments
+- ALWAYS clean up temporary files and folders you created for testing or for experiments.
+  This is very important!
 """
 
 

@@ -65,7 +65,7 @@ def test_history_nonexistent_rotation(initialized_project: Path) -> None:
 def test_history_list(initialized_project: Path) -> None:
     """Test history --list shows all rotations."""
     log1 = """================================================================================
-RALPH ROTATION 1 - 2024-01-15T10:00:00Z
+RALPH ROTATION 1 [Codex] - 2024-01-15T10:00:00Z
 ================================================================================
 
 --- STATUS ---
@@ -73,7 +73,7 @@ Signal: ROTATE
 Files Changed: 3
 """
     log2 = """================================================================================
-RALPH ROTATION 2 - 2024-01-15T10:05:00Z
+RALPH ROTATION 2 [Claude] - 2024-01-15T10:05:00Z
 ================================================================================
 
 --- STATUS ---

@@ -7,6 +7,8 @@ from pathlib import Path
 
 import typer
 
+from ralph.commands.global_flags import about_callback, version_callback
+from ralph.core.run_state import delete_run_state, is_pid_alive, read_run_state
 from ralph.core.state import (
     GUARDRAILS_TEMPLATE,
     HANDOFF_DIR,
@@ -14,6 +16,7 @@ from ralph.core.state import (
     MultiSpecState,
     SpecProgress,
     Status,
+    get_handoff_path,
     get_history_dir,
     get_ralph_dir,
     is_initialized,
@@ -29,16 +32,48 @@ from ralph.output.console import Console
 
 
 def reset(
-    keep_guardrails: bool = typer.Option(False, "--keep-guardrails", help="Preserve guardrails.md"),
-    keep_history: bool = typer.Option(False, "--keep-history", help="Preserve history/ directory"),
+    version: bool = typer.Option(
+        False,
+        "--version",
+        is_eager=True,
+        hidden=True,
+        callback=version_callback,
+    ),
+    about: bool = typer.Option(
+        False,
+        "--about",
+        is_eager=True,
+        hidden=True,
+        callback=about_callback,
+    ),
+    reset_guardrails: bool = typer.Option(
+        False, "--reset-guardrails", help="Reset guardrails.md to template"
+    ),
+    reset_history: bool = typer.Option(False, "--reset-history", help="Clear history/ directory"),
+    reset_counter: bool = typer.Option(
+        False, "--reset-counter", help="Reset verification counter (done_count) to 0"
+    ),
+    reset_handoffs: bool = typer.Option(
+        False, "--reset-handoffs", help="Reset all handoff files to template"
+    ),
 ) -> None:
-    """Reset Ralph state to start fresh."""
+    """Reset Ralph iteration counter to start a new rotation cycle."""
     root = Path.cwd()
     console = Console()
 
     if not is_initialized(root):
         console.error("Ralph not initialized", "Run: ralph init")
         raise typer.Exit(1)
+
+    run_state = read_run_state(root)
+    if run_state is not None and is_pid_alive(run_state.pid):
+        console.error(
+            f"Ralph is currently running (PID {run_state.pid})",
+            "Stop the active run before resetting",
+        )
+        raise typer.Exit(1)
+    if run_state is not None:
+        delete_run_state(root)
 
     ralph_dir = get_ralph_dir(root)
 
@@ -50,18 +85,28 @@ def reset(
             preserved_specs.append(
                 SpecProgress(
                     path=spec.path,
-                    done_count=0,  # Reset done_count
+                    done_count=0 if reset_counter else spec.done_count,  # Reset or preserve
                     last_status=spec.last_status,  # Preserve for priority sorting
                     last_hash=spec.last_hash,  # Preserve for modification detection
                     modified_files=spec.modified_files,  # Preserve for priority sorting
                 )
             )
 
-    # Reset state files
+    # Always reset iteration and status
     write_iteration(0, root)
-    write_done_count(0, root)
+
+    # Read the current done_count value for preservation
+    from ralph.core.state import read_done_count
+
+    current_done_count = read_done_count(root)
+    write_done_count(0 if reset_counter else current_done_count, root)
+
     write_status(Status.IDLE, root)
-    write_handoff(HANDOFF_TEMPLATE, root)
+
+    # Preserve legacy handoff by default
+    if reset_handoffs:
+        write_handoff(HANDOFF_TEMPLATE, root)
+
     write_multi_state(
         MultiSpecState(
             version=1,
@@ -77,30 +122,37 @@ def reset(
     for snapshot_file in ralph_dir.glob("snapshot_*"):
         snapshot_file.unlink()
 
-    # Handle guardrails
-    guardrails_preserved = False
-    if keep_guardrails:
-        guardrails_preserved = True
-    else:
+    # Handle guardrails - preserve by default
+    guardrails_reset = False
+    if reset_guardrails:
         write_guardrails(GUARDRAILS_TEMPLATE, root)
+        guardrails_reset = True
 
-    # Handle history
-    history_preserved = False
+    # Handle history - preserve by default
+    history_cleared = False
     history_dir = get_history_dir(root)
-    if keep_history:
-        history_preserved = True
-    elif history_dir.exists():
+    if reset_history and history_dir.exists():
         shutil.rmtree(history_dir)
         history_dir.mkdir()
+        history_cleared = True
 
-    # Clear per-spec handoffs
+    # Handle per-spec handoffs - preserve by default
+    handoffs_reset = False
     handoffs_dir = get_ralph_dir(root) / HANDOFF_DIR
-    if handoffs_dir.exists():
-        shutil.rmtree(handoffs_dir)
-    handoffs_dir.mkdir(parents=True, exist_ok=True)
+    if reset_handoffs:
+        handoffs_dir.mkdir(parents=True, exist_ok=True)
+        for handoff_file in handoffs_dir.glob("*.md"):
+            handoff_file.write_text(HANDOFF_TEMPLATE, encoding="utf-8")
+        for spec in preserved_specs:
+            get_handoff_path(spec.path, root).write_text(HANDOFF_TEMPLATE, encoding="utf-8")
+        handoffs_reset = True
 
-    typer.echo("Reset complete.")
-    typer.echo("  Iteration: 0")
-    typer.echo("  Status: IDLE")
-    typer.echo(f"  Guardrails: {'preserved' if guardrails_preserved else 'cleared'}")
-    typer.echo(f"  History: {'preserved' if history_preserved else 'cleared'}")
+    console.print("Reset complete.")
+    console.print("  Iteration: 0")
+    console.print("  Status: IDLE")
+
+    # Show what was reset and what was preserved
+    console.print(f"  Guardrails: {'reset to template' if guardrails_reset else 'preserved'}")
+    console.print(f"  History: {'cleared' if history_cleared else 'preserved'}")
+    console.print(f"  Counters: {'reset to 0' if reset_counter else 'preserved'}")
+    console.print(f"  Handoffs: {'reset to template' if handoffs_reset else 'preserved'}")

@@ -76,6 +76,15 @@ def test_should_ignore_ralph_dir() -> None:
     assert should_ignore(".ralph/history/001.log", spec) is True
 
 
+def test_should_ignore_windows_style_paths() -> None:
+    """Test backslash paths are normalized for matching."""
+    spec = create_spec(DEFAULT_IGNORES + ["specs/**/*.spec.md"])
+
+    assert should_ignore(".ralph\\status", spec) is True
+    assert should_ignore("specs\\api\\user.spec.md", spec) is True
+    assert should_ignore("src\\main.py", spec) is False
+
+
 def test_should_ignore_preserves_code_files() -> None:
     """Test that normal code files are not ignored."""
     spec = create_spec(DEFAULT_IGNORES)

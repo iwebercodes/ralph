@@ -368,8 +368,8 @@ def test_ensure_state_preserves_last_status(initialized_project: Path) -> None:
     assert result.specs[1].last_status == "DONE"
 
 
-def test_ensure_state_clears_status_on_spec_content_change(initialized_project: Path) -> None:
-    """Spec content changes reset last_status and done_count for that spec."""
+def test_ensure_state_preserves_status_on_spec_content_change(initialized_project: Path) -> None:
+    """Spec content changes reset done_count but keep prior status for modified-tier priority."""
     from ralph.core.specs import spec_content_hash
     from ralph.core.state import ensure_state, write_multi_state
 
@@ -407,11 +407,57 @@ def test_ensure_state_clears_status_on_spec_content_change(initialized_project: 
     result = ensure_state(["specs/a.spec.md", "specs/b.spec.md"], initialized_project)
 
     assert result.specs[0].done_count == 0
-    assert result.specs[0].last_status is None
+    assert result.specs[0].last_status == "DONE"
     assert result.specs[0].last_hash == initial_hash
     assert result.specs[1].done_count == 1
     assert result.specs[1].last_status == "CONTINUE"
     assert result.specs[1].last_hash == hash_b
+
+
+def test_sort_specs_prioritizes_new_before_modified(initialized_project: Path) -> None:
+    """New specs are ranked above modified specs when both exist."""
+    from ralph.core.specs import discover_specs, sort_specs_by_state, spec_content_hash
+    from ralph.core.state import ensure_state, write_multi_state
+
+    (initialized_project / "specs").mkdir(exist_ok=True)
+    mod_spec = initialized_project / "specs" / "a-modified.spec.md"
+    new_spec = initialized_project / "specs" / "z-new.spec.md"
+    mod_spec.write_text("# Goal\noriginal")
+    new_spec.write_text("# Goal\nnew")
+    mod_hash = spec_content_hash(mod_spec)
+
+    write_multi_state(
+        MultiSpecState(
+            version=1,
+            iteration=5,
+            status=Status.CONTINUE,
+            current_index=0,
+            specs=[
+                SpecProgress(
+                    path="specs/a-modified.spec.md",
+                    done_count=2,
+                    last_status="DONE",
+                    last_hash=mod_hash,
+                )
+            ],
+        ),
+        initialized_project,
+    )
+
+    mod_spec.write_text("# Goal\nmodified")
+
+    discovered = discover_specs(initialized_project)
+    synced = ensure_state([spec.rel_posix for spec in discovered], initialized_project)
+    spec_states = {
+        spec.path: (spec.last_status, spec.last_hash, spec.modified_files, spec.done_count)
+        for spec in synced.specs
+    }
+    sorted_specs = sort_specs_by_state(discovered, spec_states, initialized_project)
+
+    assert [spec.rel_posix for spec in sorted_specs[:2]] == [
+        "specs/z-new.spec.md",
+        "specs/a-modified.spec.md",
+    ]
 
 
 def test_ensure_state_preserves_spec_order_on_change(initialized_project: Path) -> None:

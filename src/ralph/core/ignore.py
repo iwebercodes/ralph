@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pathspec
 
@@ -46,5 +46,6 @@ def create_spec(patterns: list[str]) -> pathspec.PathSpec:
 
 def should_ignore(path: str | Path, spec: pathspec.PathSpec) -> bool:
     """Check if a path should be ignored."""
-    path_str = str(path)
+    # Normalize Windows separators so gitignore-style matching is stable cross-platform.
+    path_str = PurePosixPath(str(path).replace("\\", "/")).as_posix()
     return spec.match_file(path_str)
