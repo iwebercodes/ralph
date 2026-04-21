@@ -1,5 +1,52 @@
 # Changelog
 
+## v0.5.0 - Agent Pool Expansion, CLI Enhancements & Performance Tuning
+
+This release adds the Pi agent as a third backend option (alongside Claude and Codex), enhances the CLI with global flags and JSON output, improves token efficiency with less aggressive counter resets, and adds rotation timing display.
+
+### Added
+
+- **Pi agent support**: Ralph now supports the Pi coding agent as a third backend alongside Claude and Codex, enabling local LLM integration: `--agent pi` (or `-a pi`). The PiAgent class implements the full Agent protocol with robust exhaustion detection for rate limits, quota exceeded, and model unavailable errors. Pi is included in the default agent pool by default.
+
+- **Global CLI flags**: `--version` and `--about` flags are now available on all commands (not just `ralph run`), providing consistent access to version info and project overview regardless of which subcommand you use.
+
+- **`--filter` option**: Filter specs by pattern with `ralph run --filter <pattern>` to focus on specific specifications.
+
+- **`--debug-prompt` option**: Inspect the generated prompt before sending it to agents with `ralph run --debug-prompt`.
+
+- **Enhanced `ralph reset`**: Selective reset flags for targeted state clearing: `--reset-handoff`, `--reset-counters`, `--reset-verification`, and `--reset-all`.
+
+- **JSON output support**: Both `ralph inspect` and `ralph status` now support `--json` flag for machine-readable output, useful for scripting and automation.
+
+- **Rotation timing display**: Each rotation now shows human-readable duration (`Time: Xm Ys`) to help identify performance bottlenecks and understand which specs consume the most time.
+
+- **Content hash tracking**: Spec prioritization now uses content hashes to track file modifications more accurately, improving the reliability of smart sorting.
+
+- **Per-spec status tracking**: Each spec now tracks its last status and file modifications independently, enabling better state management across rotations.
+
+### Changed
+
+- **Less aggressive counter resets**: Verification counters are now reset more conservatively:
+  - DONE specs with no changes: increment counter (up to 3/3)
+  - DONE specs with changes: reset to 1/3 (not 0/3)
+  - Non-DONE specs with changes: reset to 0/3
+  - Non-DONE specs without changes: keep counter unchanged
+  - File changes only downgrade other fully verified specs from 3/3 to 2/3
+  This significantly reduces token usage by avoiding unnecessary re-processing.
+
+- **Default agent pool**: The default pool now includes all three agents (Claude, Codex, Pi) instead of just Claude and Codex.
+
+### Fixed
+
+- **Agent exhaustion detection**: Improved detection for both Claude and Codex agents, removing exhausted agents from the pool gracefully with clean exit when all agents are exhausted.
+
+- **Mock agent protocol compliance**: All mock agent classes in tests now implement `exhaustion_reason()` to satisfy the Agent protocol strictly.
+
+### QA
+
+- **Pre-commit hooks**: Added `.pre-commit-config.yaml` with ruff-format, ruff linting, and mypy strict type checking, matching CI pipeline checks.
+- **Comprehensive QA spec**: Added `specs/qa.spec.md` requiring all code to pass static analysis compliance.
+
 ## v0.4.0 - Multi-Spec Workflow
 
 Work on multiple specifications simultaneously without regressions, with intelligent prioritization.
