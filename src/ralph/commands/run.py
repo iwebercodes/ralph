@@ -10,7 +10,7 @@ from pathlib import Path
 import typer
 
 from ralph.commands.global_flags import about_callback, version_callback
-from ralph.core.agent import Agent, ClaudeAgent, CodexAgent
+from ralph.core.agent import Agent, ClaudeAgent, CodexAgent, PiAgent
 from ralph.core.loop import IterationResult, run_loop
 from ralph.core.pool import AgentPool
 from ralph.core.prompt import assemble_prompt
@@ -60,7 +60,10 @@ def run(
     ),
     max_iterations: int = typer.Option(20, "--max", "-m", help="Maximum number of iterations"),
     agents: str | None = typer.Option(
-        None, "--agents", "-a", help="Comma-separated agent names (e.g., 'claude' or 'codex')"
+        None,
+        "--agents",
+        "-a",
+        help="Comma-separated agent names (e.g. 'claude', 'codex', 'pi')",
     ),
     timeout: int | None = typer.Option(
         10800, "--timeout", help="Timeout per rotation in seconds (default: 3 hours)"
@@ -163,7 +166,7 @@ See docs: docs/writing-prompts.md"""
         raise typer.Exit(0)
 
     # Build agent pool from available agents
-    all_agents: list[Agent] = [ClaudeAgent(), CodexAgent()]
+    all_agents: list[Agent] = [ClaudeAgent(), CodexAgent(), PiAgent()]
 
     # Filter by --agents option if specified
     if agents is not None:
@@ -183,7 +186,7 @@ See docs: docs/writing-prompts.md"""
             available_names = ", ".join(a.name for a in all_agents)
             console.error(
                 f"Unknown agent: {', '.join(sorted(unknown))}",
-                f"Available agents: {available_names}",
+                f"Available agents: {available_names}. Supported agents: claude, codex, pi",
             )
             raise typer.Exit(1)
 
@@ -208,8 +211,9 @@ See docs: docs/writing-prompts.md"""
 Supported agents:
   - Claude CLI: https://claude.ai/download
   - Codex CLI: https://openai.com/codex
+  - Pi CLI: https://github.com/nicepkg/pi
 
-After installing, verify with: claude --version or codex --version"""
+After installing, verify with: claude --version, codex --version, or pi --version"""
             console.error("No AI agents available", hint)
         raise typer.Exit(1)
 

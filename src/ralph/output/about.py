@@ -18,7 +18,8 @@ WORKFLOW
 4. Inspect:     ralph inspect
 5. Check:       ralph status
 
-Ralph runs available AI agents in fresh-context rotations until the goal is complete.
+Ralph runs available AI agents (Claude Code, OpenAI Codex, or Pi) in
+fresh-context rotations until the goal is complete.
 When completion is signaled, Ralph verifies 3 times with fresh context before
 declaring success.
 

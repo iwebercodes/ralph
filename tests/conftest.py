@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from ralph.core.agent import AgentResult
 from ralph.core.state import (
     GUARDRAILS_TEMPLATE,
     HANDOFF_DIR,
@@ -73,6 +74,173 @@ def project_with_prompt(initialized_project: Path) -> Path:
     prompt = initialized_project / "PROMPT.md"
     prompt.write_text("# Goal\n\nTest goal content.\n\n# Success Criteria\n\n- [ ] Test passes")
     return initialized_project
+
+
+class MockPi:
+    """Mock Pi CLI for testing.
+
+    Creates a real 'pi' script on PATH that simulates pi's behavior:
+    - Accepts --no-session, --system-prompt, -p arguments
+    - Writes status to .ralph/status
+    - Simulates file changes
+    - Returns proper output/exit codes
+    """
+
+    @property
+    def name(self) -> str:
+        return "Pi"
+
+    def is_available(self) -> bool:
+        return True
+
+    def __init__(self, project_path: Path):
+        import tempfile
+
+        self._mock_dir = Path(tempfile.mkdtemp())
+        self._project_path = project_path
+        self.responses: list[dict[str, object]] = []
+        self.call_count = 0
+        self._script_path: Path | None = None
+        self._responses_file = self._mock_dir / "mock_responses.txt"
+        self._count_file = self._mock_dir / "call_count"
+
+    def invoke(
+        self,
+        prompt: str,
+        timeout: int | None = 10800,
+        output_file: Path | None = None,
+        crash_patterns: list[str] | None = None,
+    ) -> AgentResult:
+        """Invoke the mock pi CLI. The real subprocess is handled by the mock script on PATH."""
+        self.call_count += 1
+        idx = self.call_count - 1
+        if idx < len(self.responses):
+            response = self.responses[idx]
+            return AgentResult(
+                output=response.get("output", "Mock Pi output"),
+                exit_code=response.get("exit_code", 0),
+                error=response.get("error"),
+            )
+        return AgentResult("Exhausted responses", 0, None)
+
+    def is_exhausted(self, result: AgentResult) -> bool:
+        """Check if mock pi is exhausted based on error output."""
+        if result.exit_code == 0:
+            return False
+        error = result.error or ""
+        for pattern, _ in [(
+            r"model is not available", "model not available"),
+            (r"no available model", "no available model"),
+            (r"api[_\-]?key is not set", "API key not configured"),
+            (r"rate[_\-]?limit", "rate limit exceeded"),
+            (r"quota exceeded", "quota exceeded"),
+            (r"429 Too Many Requests", "429 Too Many Requests"),
+        ]:
+            import re
+            if re.search(pattern, error, re.IGNORECASE):
+                return True
+        return False
+
+    def exhaustion_reason(self, result: AgentResult) -> str | None:
+        """Return a human-readable Pi exhaustion reason."""
+        if result.exit_code == 0:
+            return None
+        error = result.error or ""
+        import re
+        for pattern, reason in [(
+            r"model is not available", "model not available"),
+            (r"no available model", "no available model"),
+            (r"api[_\-]?key is not set", "API key not configured"),
+            (r"rate[_\-]?limit", "rate limit exceeded"),
+            (r"quota exceeded", "quota exceeded"),
+            (r"429 Too Many Requests", "429 Too Many Requests"),
+        ]:
+            match = re.search(pattern, error, re.IGNORECASE)
+            if match:
+                return reason
+        return None
+
+    def setup(self) -> Path:
+        """Set up the mock pi script and return the bin directory."""
+        bin_dir = self._mock_dir / "mock_bin"
+        bin_dir.mkdir(exist_ok=True)
+
+        python_path = sys.executable
+
+        py_script = bin_dir / "mock_pi.py"
+        py_script_content = f'''import sys
+import json
+import os
+from pathlib import Path
+
+responses_file = Path(r"{self._responses_file}")
+count_file = Path(r"{self._count_file}")
+ralph_dir = Path(os.getcwd()) / ".ralph"
+
+if responses_file.exists():
+    with open(responses_file) as f:
+        responses = json.load(f)
+
+    if count_file.exists():
+        idx = int(count_file.read_text())
+    else:
+        idx = 0
+
+    if idx < len(responses):
+        response = responses[idx]
+        status = response.get("status", "CONTINUE")
+
+        # Write status
+        (ralph_dir / "status").write_text(status)
+
+        # Make file changes
+        for path_str in response.get("changes", []):
+            Path(path_str).parent.mkdir(parents=True, exist_ok=True)
+            Path(path_str).write_text(f"modified by rotation {{idx + 1}}")
+
+        # Write output to stdout
+        print(response.get("output", "Mock Pi output"))
+
+        # Write error to stderr if present
+        error = response.get("error")
+        if error:
+            print(error, file=sys.stderr)
+
+    # Increment call count
+    count_file.write_text(str(idx + 1))
+
+# Use exit_code from response, default 0
+exit_code = 0
+if responses_file.exists():
+    with open(responses_file) as f:
+        responses = json.load(f)
+    if count_file.exists():
+        idx = int(count_file.read_text())
+        # Note: count was already incremented above, so use idx-1 for the response we just used
+        if 0 <= idx - 1 < len(responses):
+            exit_code = responses[idx - 1].get("exit_code", 0)
+sys.exit(exit_code)
+'''
+        py_script.write_text(py_script_content)
+
+        if IS_WINDOWS:
+            script = bin_dir / "pi.cmd"
+            script.write_text(f'@"{python_path}" "{py_script}" %*\n')
+        else:
+            script = bin_dir / "pi"
+            script.write_text(f'#!/bin/sh\n"{python_path}" "{py_script}" "$@"\n')
+            script.chmod(script.stat().st_mode | stat.S_IEXEC)
+
+        self._script_path = script
+        return bin_dir
+
+    def set_responses(self, responses: list[dict[str, object]]) -> None:
+        """Set the responses the mock will return."""
+        self.responses = responses
+        import json
+
+        self._responses_file.write_text(json.dumps(responses))
+        self._count_file.write_text("0")
 
 
 class MockClaude:
@@ -174,6 +342,22 @@ def mock_claude(temp_project: Path, monkeypatch: pytest.MonkeyPatch) -> MockClau
     bin_dir = mock.setup()
 
     # Prepend mock bin to PATH (use os.pathsep for cross-platform compatibility)
+    original_path = os.environ.get("PATH", "")
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{original_path}")
+
+    return mock
+
+
+@pytest.fixture
+def mock_pi(temp_project: Path, monkeypatch: pytest.MonkeyPatch) -> MockPi:
+    """Create a mock Pi CLI.
+
+    Note: Uses temp_project fixture to ensure mock is in same directory.
+    """
+    mock = MockPi(temp_project)
+    bin_dir = mock.setup()
+
+    # Prepend mock bin to PATH
     original_path = os.environ.get("PATH", "")
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{original_path}")
 

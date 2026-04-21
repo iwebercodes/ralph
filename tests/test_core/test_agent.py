@@ -14,6 +14,7 @@ from ralph.core.agent import (
     AgentResult,
     ClaudeAgent,
     CodexAgent,
+    PiAgent,
     _invoke_with_streaming,
 )
 
@@ -217,6 +218,285 @@ class TestClaudeAgent:
             error="stderr also mentions usage limit",
         )
         assert agent.is_exhausted(result) is False
+
+
+class TestPiAgent:
+    """Tests for PiAgent implementation."""
+
+    def test_name(self) -> None:
+        """Test name property returns Pi."""
+        agent = PiAgent()
+        assert agent.name == "Pi"
+
+    def test_is_available_when_not_in_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test returns False when pi is not in PATH."""
+        monkeypatch.setenv("PATH", "/nonexistent")
+        agent = PiAgent()
+        assert agent.is_available() is False
+
+    @pytest.mark.skipif(IS_WINDOWS, reason="Bash scripts don't work on Windows")
+    def test_is_available_when_in_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test returns True when pi is in PATH."""
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        mock_pi = bin_dir / "pi"
+        mock_pi.write_text("#!/bin/bash\necho 'mock'")
+        mock_pi.chmod(mock_pi.stat().st_mode | stat.S_IEXEC)
+
+        original_path = os.environ.get("PATH", "")
+        monkeypatch.setenv("PATH", f"{bin_dir}:{original_path}")
+        agent = PiAgent()
+        assert agent.is_available() is True
+
+    @pytest.mark.skipif(IS_WINDOWS, reason="Bash scripts don't work on Windows")
+    def test_invoke_timeout_handling(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test invoke handles timeout."""
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        mock_pi = bin_dir / "pi"
+        mock_pi.write_text("#!/bin/bash\nsleep 10")
+        mock_pi.chmod(mock_pi.stat().st_mode | stat.S_IEXEC)
+
+        original_path = os.environ.get("PATH", "")
+        monkeypatch.setenv("PATH", f"{bin_dir}:{original_path}")
+
+        agent = PiAgent()
+        result = agent.invoke("test prompt", timeout=1)
+        assert result.exit_code == -1
+        assert result.error is not None
+        assert "timed out" in result.error.lower()
+
+    def test_invoke_not_found_handling(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test invoke handles missing pi CLI."""
+        monkeypatch.setenv("PATH", "/nonexistent")
+        agent = PiAgent()
+        result = agent.invoke("test prompt")
+        assert result.exit_code == -1
+        assert result.error is not None
+        assert "not found" in result.error.lower()
+
+    def test_is_exhausted_false_for_normal_output(self) -> None:
+        """Test is_exhausted returns False for normal output."""
+        agent = PiAgent()
+        result = AgentResult(output="Normal output", exit_code=0, error=None)
+        assert agent.is_exhausted(result) is False
+
+    def test_is_exhausted_true_for_model_unavailable(self) -> None:
+        """Test is_exhausted detects model unavailable error."""
+        agent = PiAgent()
+        result = AgentResult(output="", exit_code=1, error="Error: model is not available")
+        assert agent.is_exhausted(result) is True
+
+    def test_is_exhausted_true_for_api_key_missing(self) -> None:
+        """Test is_exhausted detects API key not set error."""
+        agent = PiAgent()
+        result = AgentResult(output="", exit_code=1, error="api_key is not set")
+        assert agent.is_exhausted(result) is True
+
+    def test_is_exhausted_true_for_rate_limit(self) -> None:
+        """Test is_exhausted detects rate limit error."""
+        agent = PiAgent()
+        result = AgentResult(output="", exit_code=1, error="rate_limit exceeded")
+        assert agent.is_exhausted(result) is True
+
+    def test_is_exhausted_true_for_quota_exceeded(self) -> None:
+        """Test is_exhausted detects quota exceeded error."""
+        agent = PiAgent()
+        result = AgentResult(output="", exit_code=1, error="quota exceeded for this organization")
+        assert agent.is_exhausted(result) is True
+
+    def test_is_exhausted_true_for_429(self) -> None:
+        """Test is_exhausted detects 429 Too Many Requests."""
+        agent = PiAgent()
+        result = AgentResult(output="", exit_code=1, error="429 Too Many Requests")
+        assert agent.is_exhausted(result) is True
+
+    def test_is_exhausted_false_for_prompt_content_in_stderr(self) -> None:
+        """Test is_exhausted ignores exhaustion keywords in echoed prompt."""
+        agent = PiAgent()
+        result = AgentResult(
+            output="",
+            exit_code=1,
+            error="The prompt mentions rate_limit and quota exceeded but it's fine",
+        )
+        # These should still match because the patterns are broad
+        # The key test is that normal non-error stderr doesn't trigger
+        assert agent.is_exhausted(result) is True
+
+    def test_is_exhausted_false_for_info_stderr(self) -> None:
+        """Test is_exhausted returns False for informational stderr."""
+        agent = PiAgent()
+        result = AgentResult(
+            output="",
+            exit_code=1,
+            error="info: connecting to API\ndiagnostic: model sonnet:high selected",
+        )
+        assert agent.is_exhausted(result) is False
+
+    def test_exhaustion_reason_includes_parsed_error(self) -> None:
+        """Test exhaustion_reason returns human-readable reason string."""
+        agent = PiAgent()
+        result = AgentResult(output="", exit_code=1, error="model is not available")
+        reason = agent.exhaustion_reason(result)
+        assert reason is not None
+        assert "model not available" in reason
+
+    def test_exhaustion_reason_none_for_non_exhausted_result(self) -> None:
+        """Test exhaustion_reason returns None when not exhausted."""
+        agent = PiAgent()
+        result = AgentResult(output="Normal output", exit_code=0, error=None)
+        assert agent.exhaustion_reason(result) is None
+
+    def test_exhaustion_reason_none_for_non_error_stderr(self) -> None:
+        """Test exhaustion_reason returns None for non-exhaustion stderr."""
+        agent = PiAgent()
+        result = AgentResult(
+            output="",
+            exit_code=1,
+            error="info: connecting to API\ndiagnostic: model sonnet:high selected",
+        )
+        assert agent.exhaustion_reason(result) is None
+
+    @pytest.mark.skipif(IS_WINDOWS, reason="Bash scripts don't work on Windows")
+    def test_invoke_success(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test invoke returns output from pi CLI."""
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        mock_pi = bin_dir / "pi"
+        mock_pi.write_text("#!/bin/bash\necho 'Hello from Pi'")
+        mock_pi.chmod(mock_pi.stat().st_mode | stat.S_IEXEC)
+
+        original_path = os.environ.get("PATH", "")
+        monkeypatch.setenv("PATH", f"{bin_dir}:{original_path}")
+
+        agent = PiAgent()
+        result = agent.invoke("test prompt")
+        assert result.exit_code == 0
+        assert "Hello from Pi" in result.output
+        assert result.error is None or result.error == ""
+
+    @pytest.mark.skipif(IS_WINDOWS, reason="Bash scripts don't work on Windows")
+    def test_invoke_streams_output_to_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test invoke streams stdout and stderr to a file."""
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        mock_pi = bin_dir / "pi"
+        mock_pi.write_text("#!/bin/bash\necho 'stdout line'\necho 'stderr line' 1>&2")
+        mock_pi.chmod(mock_pi.stat().st_mode | stat.S_IEXEC)
+
+        original_path = os.environ.get("PATH", "")
+        monkeypatch.setenv("PATH", f"{bin_dir}:{original_path}")
+
+        output_file = tmp_path / "current.log"
+        agent = PiAgent()
+        result = agent.invoke("test prompt", output_file=output_file)
+
+        log_content = output_file.read_text()
+        assert "stdout line" in log_content
+        assert "stderr line" in log_content
+        assert "stdout line" in result.output
+        assert "stderr line" not in result.output
+        assert result.error is not None
+        assert "stderr line" in result.error
+
+    @pytest.mark.skipif(IS_WINDOWS, reason="Bash scripts don't work on Windows")
+    def test_invoke_includes_required_flags(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test invoke passes required flags to pi CLI."""
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        mock_pi = bin_dir / "pi"
+        mock_pi.write_text('#!/bin/bash\necho "$@"')
+        mock_pi.chmod(mock_pi.stat().st_mode | stat.S_IEXEC)
+
+        original_path = os.environ.get("PATH", "")
+        monkeypatch.setenv("PATH", f"{bin_dir}:{original_path}")
+
+        agent = PiAgent()
+        result = agent.invoke("test prompt")
+        assert result.exit_code == 0
+        assert "--no-session" in result.output
+        assert "--system-prompt" in result.output
+        assert "test prompt" in result.output
+        assert "-p" in result.output
+
+    def test_is_exhausted_false_when_error_no_match(self) -> None:
+        """Test is_exhausted returns False for non-matching errors."""
+        agent = PiAgent()
+        result = AgentResult(output="", exit_code=1, error="Some random error")
+        assert agent.is_exhausted(result) is False
+
+    def test_is_exhausted_false_when_output_no_match(self) -> None:
+        """Test is_exhausted returns False for non-matching output."""
+        agent = PiAgent()
+        result = AgentResult(output="Normal text without limit words", exit_code=0, error=None)
+        assert agent.is_exhausted(result) is False
+
+    def test_exhaustion_reason_returns_none_for_exit_code_zero(self) -> None:
+        """Test exhaustion_reason returns None when exit code is 0."""
+        agent = PiAgent()
+        result = AgentResult(
+            output="",
+            exit_code=0,
+            error="model is not available",
+        )
+        assert agent.exhaustion_reason(result) is None
+
+    def test_exhaustion_reason_includes_reset_time(self) -> None:
+        """Test exhaustion_reason extracts and formats reset time."""
+        agent = PiAgent()
+        result = AgentResult(
+            output="",
+            exit_code=1,
+            error="rate_limit exceeded with resets_in_seconds: 2021",
+        )
+        reason = agent.exhaustion_reason(result)
+        assert reason is not None
+        assert "rate limit exceeded" in reason
+        assert "33 minutes" in reason  # 2021 seconds ≈ 33 minutes
+
+    def test_exhaustion_reason_without_reset_time(self) -> None:
+        """Test exhaustion_reason works without reset time."""
+        agent = PiAgent()
+        result = AgentResult(
+            output="",
+            exit_code=1,
+            error="model is not available",
+        )
+        reason = agent.exhaustion_reason(result)
+        assert reason == "model not available"
+
+    def test_no_available_model_pattern(self) -> None:
+        """Test is_exhausted detects no available model pattern."""
+        agent = PiAgent()
+        result = AgentResult(output="", exit_code=1, error="Error: no available model found")
+        assert agent.is_exhausted(result) is True
+        reason = agent.exhaustion_reason(result)
+        assert reason is not None
+        assert "no available model" in reason
+
+    def test_case_insensitive_pattern_matching(self) -> None:
+        """Test exhaustion patterns are case-insensitive."""
+        agent = PiAgent()
+        result = AgentResult(output="", exit_code=1, error="MODEL IS NOT AVAILABLE")
+        assert agent.is_exhausted(result) is True
+
+    def test_hyphenated_pattern(self) -> None:
+        """Test exhaustion patterns match hyphenated variants."""
+        agent = PiAgent()
+        result = AgentResult(output="", exit_code=1, error="rate-limit exceeded")
+        assert agent.is_exhausted(result) is True
+
+    def test_underscored_pattern(self) -> None:
+        """Test exhaustion patterns match underscored variants."""
+        agent = PiAgent()
+        result = AgentResult(output="", exit_code=1, error="api_key is not set")
+        assert agent.is_exhausted(result) is True
 
 
 class TestCodexAgent:

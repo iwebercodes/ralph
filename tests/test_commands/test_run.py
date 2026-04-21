@@ -26,8 +26,33 @@ from ralph.core.state import (
     write_multi_state,
     write_status,
 )
+from tests.conftest import MockPi
 
 runner = CliRunner()
+
+
+class _UnavailableClaude:
+    """Mock Claude agent that is unavailable."""
+    name = "Claude"
+    is_available = lambda self: False  # noqa: E731
+
+
+class _UnavailableCodex:
+    """Mock Codex agent that is unavailable."""
+    name = "Codex"
+    is_available = lambda self: False  # noqa: E731
+
+
+class _AvailableClaude:
+    """Mock Claude agent that is available."""
+    name = "Claude"
+    is_available = lambda self: True  # noqa: E731
+
+
+class _AvailableCodex:
+    """Mock Codex agent that is available."""
+    name = "Codex"
+    is_available = lambda self: True  # noqa: E731
 
 
 class MockAgentForCLI:
@@ -156,7 +181,7 @@ def test_run_single_iteration(
     ):
         # Make ClaudeAgent available, CodexAgent not available
         mock_claude_instance = mock_agent
-        mock_codex_instance = type("MockCodex", (), {"is_available": lambda self: False})()
+        mock_codex_instance = _UnavailableCodex()
         mock_claude_cls.return_value = mock_claude_instance
         mock_codex_cls.return_value = mock_codex_instance
         mock_pool_cls.return_value = mock_pool
@@ -182,7 +207,7 @@ def _run_with_mock_agent(project_path: Path, responses: list[dict], max_iter: in
         patch("ralph.commands.run.AgentPool") as mock_pool_cls,
     ):
         mock_claude_cls.return_value = mock_agent
-        mock_codex_cls.return_value = type("MockCodex", (), {"is_available": lambda self: False})()
+        mock_codex_cls.return_value = _UnavailableCodex()
         mock_pool_cls.return_value = mock_pool
 
         return runner.invoke(app, ["run", "--max", str(max_iter)])
@@ -577,7 +602,7 @@ def test_run_filter_executes_only_matching_spec(temp_project: Path) -> None:
         patch("ralph.commands.run.AgentPool") as mock_pool_cls,
     ):
         mock_claude_cls.return_value = mock_agent
-        mock_codex_cls.return_value = type("MockCodex", (), {"is_available": lambda self: False})()
+        mock_codex_cls.return_value = _UnavailableCodex()
         mock_pool_cls.return_value = mock_pool
 
         result = runner.invoke(app, ["run", "--filter", "auth", "--max", "5"])
@@ -622,7 +647,7 @@ def test_run_filter_resume_overrides_previous_current_spec(temp_project: Path) -
         patch("ralph.commands.run.AgentPool") as mock_pool_cls,
     ):
         mock_claude_cls.return_value = mock_agent
-        mock_codex_cls.return_value = type("MockCodex", (), {"is_available": lambda self: False})()
+        mock_codex_cls.return_value = _UnavailableCodex()
         mock_pool_cls.return_value = mock_pool
 
         result = runner.invoke(app, ["run", "--filter", "auth", "--max", "1"])
@@ -762,3 +787,246 @@ def test_run_multiple_rotations_show_independent_durations(project_with_prompt: 
     assert result.output.count("[ralph] Time:") == 2
     assert "[ralph] Time: 45s" in result.output
     assert "[ralph] Time: 2m 13s" in result.output
+
+
+# ---- Integration tests with mock Pi CLI ----
+
+
+def test_run_with_mock_pi_single_iteration(
+    project_with_prompt: Path,
+    mock_pi: MockPi,
+) -> None:
+    """Test run executes a full iteration using the real PiAgent calling mock pi CLI."""
+    mock_pi.set_responses([
+        {"status": "DONE", "output": "Task completed", "changes": []},
+        {"status": "DONE", "output": "Review 1", "changes": []},
+        {"status": "DONE", "output": "Review 2", "changes": []},
+    ])
+
+    # Make Claude and Codex unavailable so only Pi is selected
+    with (
+        patch("ralph.commands.run.ClaudeAgent") as mock_claude_cls,
+        patch("ralph.commands.run.CodexAgent") as mock_codex_cls,
+    ):
+        mock_claude_cls.return_value = _UnavailableClaude()
+        mock_codex_cls.return_value = _UnavailableCodex()
+
+        result = runner.invoke(app, ["run", "--agents", "pi", "--max", "10"])
+
+    assert result.exit_code == 0
+    assert "Goal achieved" in result.output
+    # PiAgent was invoked 3 times (1 implementation + 2 reviews)
+    assert read_iteration(project_with_prompt) == 3
+
+
+def test_run_with_mock_pi_creates_files(
+    project_with_prompt: Path,
+    mock_pi: MockPi,
+) -> None:
+    """Test that mock pi can create files that Ralph detects."""
+    mock_pi.set_responses([
+        {
+            "status": "DONE",
+            "output": "Created calculator module",
+            "changes": ["calculator.py", "test_calculator.py"],
+        },
+        {"status": "DONE", "output": "Verified", "changes": []},
+        {"status": "DONE", "output": "Verified", "changes": []},
+    ])
+
+    with (
+        patch("ralph.commands.run.ClaudeAgent") as mock_claude_cls,
+        patch("ralph.commands.run.CodexAgent") as mock_codex_cls,
+    ):
+        mock_claude_cls.return_value = _UnavailableClaude()
+        mock_codex_cls.return_value = _UnavailableCodex()
+
+        result = runner.invoke(app, ["run", "--agents", "pi", "--max", "10"])
+
+    assert result.exit_code == 0
+    # Verify files were created by the mock
+    assert (project_with_prompt / "calculator.py").exists()
+    assert (project_with_prompt / "test_calculator.py").exists()
+    assert read_iteration(project_with_prompt) == 3
+
+
+def test_run_with_mock_pi_rotate_then_done(
+    project_with_prompt: Path,
+    mock_pi: MockPi,
+) -> None:
+    """Test full flow: ROTATE signal then DONE, all via real PiAgent + mock pi."""
+    mock_pi.set_responses([
+        {"status": "ROTATE", "output": "Still working on this", "changes": ["work_in_progress.py"]},
+        {"status": "DONE", "output": "Finished the task", "changes": []},
+        {"status": "DONE", "output": "Review 1", "changes": []},
+        {"status": "DONE", "output": "Review 2", "changes": []},
+    ])
+
+    with (
+        patch("ralph.commands.run.ClaudeAgent") as mock_claude_cls,
+        patch("ralph.commands.run.CodexAgent") as mock_codex_cls,
+    ):
+        mock_claude_cls.return_value = _UnavailableClaude()
+        mock_codex_cls.return_value = _UnavailableCodex()
+
+        result = runner.invoke(app, ["run", "--agents", "pi", "--max", "10"])
+
+    assert result.exit_code == 0
+    assert read_iteration(project_with_prompt) == 4
+
+
+def test_run_with_mock_pi_done_with_changes_resets(
+    project_with_prompt: Path,
+    mock_pi: MockPi,
+) -> None:
+    """Test that DONE with changes resets the verification count (real PiAgent path)."""
+    mock_pi.set_responses([
+        {"status": "DONE", "output": "Done but changed", "changes": ["revised.py"]},
+        {"status": "DONE", "output": "Verified clean", "changes": []},
+        {"status": "DONE", "output": "Review 1", "changes": []},
+    ])
+
+    with (
+        patch("ralph.commands.run.ClaudeAgent") as mock_claude_cls,
+        patch("ralph.commands.run.CodexAgent") as mock_codex_cls,
+    ):
+        mock_claude_cls.return_value = _UnavailableClaude()
+        mock_codex_cls.return_value = _UnavailableCodex()
+
+        result = runner.invoke(app, ["run", "--agents", "pi", "--max", "10"])
+
+    assert result.exit_code == 0
+    # 1 DONE with changes (1/3) + 2 more clean reviews (2/3, 3/3) = 3 total iterations
+    assert read_iteration(project_with_prompt) == 3
+
+
+def test_run_with_mock_pi_stuck_exits(
+    project_with_prompt: Path,
+    mock_pi: MockPi,
+) -> None:
+    """Test that STUCK signal from pi causes exit code 2."""
+    mock_pi.set_responses([
+        {"status": "STUCK", "output": "I'm blocked and can't proceed", "changes": []},
+    ])
+
+    with (
+        patch("ralph.commands.run.ClaudeAgent") as mock_claude_cls,
+        patch("ralph.commands.run.CodexAgent") as mock_codex_cls,
+    ):
+        mock_claude_cls.return_value = _UnavailableClaude()
+        mock_codex_cls.return_value = _UnavailableCodex()
+
+        result = runner.invoke(app, ["run", "--agents", "pi", "--max", "10"])
+
+    assert result.exit_code == 2
+    assert "stuck" in result.output.lower()
+
+
+def test_run_with_mock_pi_exhaustion_detection(
+    project_with_prompt: Path,
+    mock_pi: MockPi,
+) -> None:
+    """Test that PiAgent correctly detects exhaustion from mock pi error output."""
+    # First call returns an error with rate limit pattern
+    mock_pi.set_responses([
+        {
+            "status": "CONTINUE",
+            "output": "",
+            "changes": [],
+            "exit_code": 1,
+            "error": "Error: rate_limit exceeded - try again in 30 seconds",
+        },
+    ])
+
+    with (
+        patch("ralph.commands.run.ClaudeAgent") as mock_claude_cls,
+        patch("ralph.commands.run.CodexAgent") as mock_codex_cls,
+    ):
+        mock_claude_cls.return_value = _UnavailableClaude()
+        mock_codex_cls.return_value = _UnavailableCodex()
+
+        result = runner.invoke(app, ["run", "--agents", "pi", "--max", "10"])
+
+    # The agent should detect exhaustion and the pool should be empty
+    assert result.exit_code == 4
+    assert "all agents exhausted" in result.output.lower()
+
+
+def test_run_with_mock_pi_exits_at_max_iterations(
+    project_with_prompt: Path,
+    mock_pi: MockPi,
+) -> None:
+    """Test that run stops at max iterations even with mock pi."""
+    mock_pi.set_responses([
+        {"status": "ROTATE", "output": "Still working", "changes": [f"file{i}.py"]}
+        for i in range(5)
+    ])
+
+    with (
+        patch("ralph.commands.run.ClaudeAgent") as mock_claude_cls,
+        patch("ralph.commands.run.CodexAgent") as mock_codex_cls,
+    ):
+        mock_claude_cls.return_value = _UnavailableClaude()
+        mock_codex_cls.return_value = _UnavailableCodex()
+
+        result = runner.invoke(app, ["run", "--agents", "pi", "--max", "3"])
+
+    assert result.exit_code == 3
+    assert "max iterations" in result.output.lower()
+    assert read_iteration(project_with_prompt) == 3
+
+
+def test_run_agents_pi_only(
+    project_with_prompt: Path,
+    mock_pi: MockPi,
+) -> None:
+    """Test --agents pi filters to only Pi agent."""
+    mock_pi.set_responses([
+        {"status": "DONE", "output": "Done", "changes": []},
+        {"status": "DONE", "output": "Review 1", "changes": []},
+        {"status": "DONE", "output": "Review 2", "changes": []},
+    ])
+
+    with (
+        patch("ralph.commands.run.ClaudeAgent") as mock_claude_cls,
+        patch("ralph.commands.run.CodexAgent") as mock_codex_cls,
+    ):
+        mock_claude_cls.return_value = _UnavailableClaude()
+        mock_codex_cls.return_value = _UnavailableCodex()
+
+        result = runner.invoke(app, ["run", "--agents", "pi"])
+
+    assert result.exit_code == 0
+    assert "Goal achieved" in result.output
+    assert read_iteration(project_with_prompt) == 3
+
+
+def test_run_agents_pi_with_other_available(
+    project_with_prompt: Path,
+    mock_pi: MockPi,
+) -> None:
+    """Test --agents pi filters to only Pi even when Claude/Codex are available."""
+    from ralph.core.pool import AgentPool
+
+    captured_agents: list[str] = []
+
+    def capture_pool(agents):
+        captured_agents.extend(a.name for a in agents)
+        return AgentPool(agents)
+
+    with (
+        patch("ralph.commands.run.ClaudeAgent") as mock_claude_cls,
+        patch("ralph.commands.run.CodexAgent") as mock_codex_cls,
+        patch("ralph.commands.run.PiAgent") as mock_pi_cls,
+        patch("ralph.commands.run.AgentPool", side_effect=capture_pool),
+    ):
+        # Claude and Codex are "available" (not patched to be unavailable)
+        mock_claude_cls.return_value = _AvailableClaude()
+        mock_codex_cls.return_value = _AvailableCodex()
+        mock_pi_cls.return_value = mock_pi
+
+        # noqa: F841
+        runner.invoke(app, ["run", "--agents", "pi"])
+
+    # Only Pi should be in the pool (Claude and Codex filtered out by --agents pi)
+    assert captured_agents == ["Pi"]

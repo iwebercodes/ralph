@@ -1,4 +1,9 @@
-"""Prompt assembly for Claude invocations."""
+"""Prompt assembly for any agent (Claude, Codex, Pi, etc.).
+
+These templates are agent-agnostic — they use generic instructions that work
+with any Agent Protocol-compatible CLI agent. The same prompts drive all agents
+supported by Ralph.
+"""
 
 from __future__ import annotations
 
@@ -170,7 +175,7 @@ def assemble_prompt(
     spec_path: str,
     handoff_path: str,
 ) -> str:
-    """Assemble the full prompt for Claude."""
+    """Assemble the full prompt for any supported agent (Claude, Codex, Pi)."""
     if done_count > 0:
         return PROMPT_TEMPLATE_REVIEW.format(
             iteration=iteration,

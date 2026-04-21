@@ -68,6 +68,96 @@ class Agent(Protocol):
         ...
 
 
+class PiAgent:
+    """Agent implementation using pi coding agent CLI."""
+
+    # Specific patterns that indicate pi exhaustion or unrecoverable errors.
+    # These are designed to avoid false positives from informational stderr output.
+    _EXHAUSTION_PATTERNS: list[tuple[str, str]] = [
+        (r"model is not available", "model not available"),
+        (r"no available model", "no available model"),
+        (r"api[_\-]?key is not set", "API key not configured"),
+        (r"rate[_\-]?limit", "rate limit exceeded"),
+        (r"quota exceeded", "quota exceeded"),
+        (r"429 Too Many Requests", "429 Too Many Requests"),
+    ]
+
+    @property
+    def name(self) -> str:
+        return "Pi"
+
+    def is_available(self) -> bool:
+        """Check if pi CLI is available in PATH."""
+        return shutil.which("pi") is not None
+
+    def invoke(
+        self,
+        prompt: str,
+        timeout: int | None = 10800,
+        output_file: Path | None = None,
+        crash_patterns: list[str] | None = None,
+    ) -> AgentResult:
+        """Invoke pi CLI with the given prompt in print mode.
+
+        Uses --system-prompt to pass the full Ralph prompt, --no-session for
+        single-shot invocation, and -p (print mode) for clean text output.
+        """
+        pi_path = shutil.which("pi")
+        if pi_path is None:
+            return AgentResult(
+                output="",
+                exit_code=-1,
+                error="pi CLI not found in PATH",
+            )
+
+        # Escape the system prompt for shell safety.
+        # The prompt may contain quotes, dollar signs, etc., so we use
+        # a shell-escaped form. Since we're building a list (not a shell
+        # string), double quotes with proper escaping are sufficient.
+        escaped_prompt = prompt.replace('"', '\\"')
+
+        cmd = [
+            pi_path,
+            "--no-session",
+            "--system-prompt",
+            escaped_prompt,
+            "-p",
+            "Work on the task described in the system prompt above",
+        ]
+
+        return _invoke_command(
+            cmd,
+            timeout=timeout,
+            output_file=output_file,
+            timeout_message="Pi invocation timed out",
+            not_found_message="pi CLI not found in PATH",
+            crash_patterns=crash_patterns,
+        )
+
+    def is_exhausted(self, result: AgentResult) -> bool:
+        """Check if Pi is exhausted based on error output.
+
+        Only returns True if:
+        1. The exit code indicates failure (non-zero)
+        2. The stderr contains a specific exhaustion pattern
+        """
+        if result.exit_code == 0:
+            return False
+        return _pi_extract_exhaustion_info(result.error) is not None
+
+    def exhaustion_reason(self, result: AgentResult) -> str | None:
+        """Return a human-readable Pi exhaustion reason."""
+        if result.exit_code == 0:
+            return None
+        info = _pi_extract_exhaustion_info(result.error)
+        if info is None:
+            return None
+        pattern, reset_seconds = info
+        if reset_seconds is not None:
+            return f"{pattern} (resets in {_format_duration(reset_seconds)})"
+        return pattern
+
+
 class ClaudeAgent:
     """Agent implementation using Claude CLI."""
 
@@ -320,6 +410,48 @@ def _codex_runtime_error_text(error: str) -> str | None:
     if start_index is None:
         return None
     return error[start_index:]
+
+
+def _pi_extract_exhaustion_info(error: str | None) -> tuple[str, int | None] | None:
+    """Extract exhaustion pattern from Pi error output.
+
+    Pi outputs diagnostics and warnings to stderr. Exhaustion patterns are
+    specific error messages that indicate the agent cannot proceed (model
+    unavailable, API key missing, rate limited, etc.).
+
+    Returns:
+        A tuple of (pattern_matched, reset_seconds) if exhaustion detected,
+        where reset_seconds may be None if not available. Returns None if
+        no exhaustion pattern matched.
+    """
+    if not error:
+        return None
+
+    for pattern, reason in PiAgent._EXHAUSTION_PATTERNS:
+        if re.search(pattern, error, re.IGNORECASE):
+            reset_seconds = _pi_extract_reset_seconds(error)
+            return (reason, reset_seconds)
+
+    return None
+
+
+def _pi_extract_reset_seconds(error: str) -> int | None:
+    """Extract reset time in seconds from Pi error output."""
+    # Try resets_in_seconds first
+    match = re.search(r"resets_in_seconds[\s:=]+(\d+)", error)
+    if match:
+        return int(match.group(1))
+    # Try retry_after
+    match = re.search(r"retry_after[\s:=]+(\d+)", error)
+    if match:
+        return int(match.group(1))
+    # Try "try again in N" or "try again at N" (heuristic: < 100 means seconds)
+    match = re.search(r"try again [^\d]*(\d+)", error, re.IGNORECASE)
+    if match:
+        val = int(match.group(1))
+        if val < 100:
+            return val
+    return None
 
 
 def _claude_extract_exhaustion_info(output: str | None) -> tuple[str, int | None] | None:
