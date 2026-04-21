@@ -29,7 +29,7 @@ class MockAgent:
     def invoke(
         self,
         prompt: str,
-        timeout: int = 1800,
+        timeout: int | None = 1800,
         output_file: Path | None = None,
         crash_patterns: list[str] | None = None,
     ) -> AgentResult:
@@ -43,6 +43,9 @@ class MockAgent:
         if self.exhausted_after is not None:
             return self.invoke_count > self.exhausted_after
         return False
+
+    def exhaustion_reason(self, result: AgentResult) -> str | None:
+        return None
 
 
 class TestAgentPoolConstruction:

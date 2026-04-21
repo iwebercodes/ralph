@@ -33,24 +33,28 @@ runner = CliRunner()
 
 class _UnavailableClaude:
     """Mock Claude agent that is unavailable."""
+
     name = "Claude"
     is_available = lambda self: False  # noqa: E731
 
 
 class _UnavailableCodex:
     """Mock Codex agent that is unavailable."""
+
     name = "Codex"
     is_available = lambda self: False  # noqa: E731
 
 
 class _AvailableClaude:
     """Mock Claude agent that is available."""
+
     name = "Claude"
     is_available = lambda self: True  # noqa: E731
 
 
 class _AvailableCodex:
     """Mock Codex agent that is available."""
+
     name = "Codex"
     is_available = lambda self: True  # noqa: E731
 
@@ -73,7 +77,7 @@ class MockAgentForCLI:
     def invoke(
         self,
         prompt: str,
-        timeout: int = 1800,
+        timeout: int | None = 1800,
         output_file: Path | None = None,
         crash_patterns: list[str] | None = None,
     ) -> AgentResult:
@@ -101,6 +105,9 @@ class MockAgentForCLI:
 
     def is_exhausted(self, result: AgentResult) -> bool:
         return False
+
+    def exhaustion_reason(self, result: AgentResult) -> str | None:
+        return None
 
 
 def test_run_not_initialized(temp_project: Path) -> None:
@@ -797,11 +804,13 @@ def test_run_with_mock_pi_single_iteration(
     mock_pi: MockPi,
 ) -> None:
     """Test run executes a full iteration using the real PiAgent calling mock pi CLI."""
-    mock_pi.set_responses([
-        {"status": "DONE", "output": "Task completed", "changes": []},
-        {"status": "DONE", "output": "Review 1", "changes": []},
-        {"status": "DONE", "output": "Review 2", "changes": []},
-    ])
+    mock_pi.set_responses(
+        [
+            {"status": "DONE", "output": "Task completed", "changes": []},
+            {"status": "DONE", "output": "Review 1", "changes": []},
+            {"status": "DONE", "output": "Review 2", "changes": []},
+        ]
+    )
 
     # Make Claude and Codex unavailable so only Pi is selected
     with (
@@ -824,15 +833,17 @@ def test_run_with_mock_pi_creates_files(
     mock_pi: MockPi,
 ) -> None:
     """Test that mock pi can create files that Ralph detects."""
-    mock_pi.set_responses([
-        {
-            "status": "DONE",
-            "output": "Created calculator module",
-            "changes": ["calculator.py", "test_calculator.py"],
-        },
-        {"status": "DONE", "output": "Verified", "changes": []},
-        {"status": "DONE", "output": "Verified", "changes": []},
-    ])
+    mock_pi.set_responses(
+        [
+            {
+                "status": "DONE",
+                "output": "Created calculator module",
+                "changes": ["calculator.py", "test_calculator.py"],
+            },
+            {"status": "DONE", "output": "Verified", "changes": []},
+            {"status": "DONE", "output": "Verified", "changes": []},
+        ]
+    )
 
     with (
         patch("ralph.commands.run.ClaudeAgent") as mock_claude_cls,
@@ -855,12 +866,18 @@ def test_run_with_mock_pi_rotate_then_done(
     mock_pi: MockPi,
 ) -> None:
     """Test full flow: ROTATE signal then DONE, all via real PiAgent + mock pi."""
-    mock_pi.set_responses([
-        {"status": "ROTATE", "output": "Still working on this", "changes": ["work_in_progress.py"]},
-        {"status": "DONE", "output": "Finished the task", "changes": []},
-        {"status": "DONE", "output": "Review 1", "changes": []},
-        {"status": "DONE", "output": "Review 2", "changes": []},
-    ])
+    mock_pi.set_responses(
+        [
+            {
+                "status": "ROTATE",
+                "output": "Still working on this",
+                "changes": ["work_in_progress.py"],
+            },
+            {"status": "DONE", "output": "Finished the task", "changes": []},
+            {"status": "DONE", "output": "Review 1", "changes": []},
+            {"status": "DONE", "output": "Review 2", "changes": []},
+        ]
+    )
 
     with (
         patch("ralph.commands.run.ClaudeAgent") as mock_claude_cls,
@@ -880,11 +897,13 @@ def test_run_with_mock_pi_done_with_changes_resets(
     mock_pi: MockPi,
 ) -> None:
     """Test that DONE with changes resets the verification count (real PiAgent path)."""
-    mock_pi.set_responses([
-        {"status": "DONE", "output": "Done but changed", "changes": ["revised.py"]},
-        {"status": "DONE", "output": "Verified clean", "changes": []},
-        {"status": "DONE", "output": "Review 1", "changes": []},
-    ])
+    mock_pi.set_responses(
+        [
+            {"status": "DONE", "output": "Done but changed", "changes": ["revised.py"]},
+            {"status": "DONE", "output": "Verified clean", "changes": []},
+            {"status": "DONE", "output": "Review 1", "changes": []},
+        ]
+    )
 
     with (
         patch("ralph.commands.run.ClaudeAgent") as mock_claude_cls,
@@ -905,9 +924,11 @@ def test_run_with_mock_pi_stuck_exits(
     mock_pi: MockPi,
 ) -> None:
     """Test that STUCK signal from pi causes exit code 2."""
-    mock_pi.set_responses([
-        {"status": "STUCK", "output": "I'm blocked and can't proceed", "changes": []},
-    ])
+    mock_pi.set_responses(
+        [
+            {"status": "STUCK", "output": "I'm blocked and can't proceed", "changes": []},
+        ]
+    )
 
     with (
         patch("ralph.commands.run.ClaudeAgent") as mock_claude_cls,
@@ -928,15 +949,17 @@ def test_run_with_mock_pi_exhaustion_detection(
 ) -> None:
     """Test that PiAgent correctly detects exhaustion from mock pi error output."""
     # First call returns an error with rate limit pattern
-    mock_pi.set_responses([
-        {
-            "status": "CONTINUE",
-            "output": "",
-            "changes": [],
-            "exit_code": 1,
-            "error": "Error: rate_limit exceeded - try again in 30 seconds",
-        },
-    ])
+    mock_pi.set_responses(
+        [
+            {
+                "status": "CONTINUE",
+                "output": "",
+                "changes": [],
+                "exit_code": 1,
+                "error": "Error: rate_limit exceeded - try again in 30 seconds",
+            },
+        ]
+    )
 
     with (
         patch("ralph.commands.run.ClaudeAgent") as mock_claude_cls,
@@ -957,10 +980,12 @@ def test_run_with_mock_pi_exits_at_max_iterations(
     mock_pi: MockPi,
 ) -> None:
     """Test that run stops at max iterations even with mock pi."""
-    mock_pi.set_responses([
-        {"status": "ROTATE", "output": "Still working", "changes": [f"file{i}.py"]}
-        for i in range(5)
-    ])
+    mock_pi.set_responses(
+        [
+            {"status": "ROTATE", "output": "Still working", "changes": [f"file{i}.py"]}
+            for i in range(5)
+        ]
+    )
 
     with (
         patch("ralph.commands.run.ClaudeAgent") as mock_claude_cls,
@@ -981,11 +1006,13 @@ def test_run_agents_pi_only(
     mock_pi: MockPi,
 ) -> None:
     """Test --agents pi filters to only Pi agent."""
-    mock_pi.set_responses([
-        {"status": "DONE", "output": "Done", "changes": []},
-        {"status": "DONE", "output": "Review 1", "changes": []},
-        {"status": "DONE", "output": "Review 2", "changes": []},
-    ])
+    mock_pi.set_responses(
+        [
+            {"status": "DONE", "output": "Done", "changes": []},
+            {"status": "DONE", "output": "Review 1", "changes": []},
+            {"status": "DONE", "output": "Review 2", "changes": []},
+        ]
+    )
 
     with (
         patch("ralph.commands.run.ClaudeAgent") as mock_claude_cls,

@@ -291,7 +291,7 @@ class ExhaustingAgent:
     def invoke(
         self,
         prompt: str,
-        timeout: int = 1800,
+        timeout: int | None = 1800,
         output_file: Path | None = None,
         crash_patterns: list[str] | None = None,
     ) -> AgentResult:
@@ -350,7 +350,7 @@ class CodexUsageLimitAgent(CodexAgent):
     def invoke(
         self,
         prompt: str,
-        timeout: int = 1800,
+        timeout: int | None = 1800,
         output_file: Path | None = None,
         crash_patterns: list[str] | None = None,
     ) -> AgentResult:
@@ -367,7 +367,7 @@ class CodexNonExhaustedAgent(CodexAgent):
     def invoke(
         self,
         prompt: str,
-        timeout: int = 1800,
+        timeout: int | None = 1800,
         output_file: Path | None = None,
         crash_patterns: list[str] | None = None,
     ) -> AgentResult:
@@ -388,7 +388,7 @@ class ClaudeUsageLimitAgent(ClaudeAgent):
     def invoke(
         self,
         prompt: str,
-        timeout: int = 1800,
+        timeout: int | None = 1800,
         output_file: Path | None = None,
         crash_patterns: list[str] | None = None,
     ) -> AgentResult:
@@ -407,7 +407,7 @@ class ClaudeExitCodeZeroLimitTextAgent(ClaudeAgent):
     def invoke(
         self,
         prompt: str,
-        timeout: int = 1800,
+        timeout: int | None = 1800,
         output_file: Path | None = None,
         crash_patterns: list[str] | None = None,
     ) -> AgentResult:
@@ -426,7 +426,7 @@ class ClaudeNoSignatureErrorAgent(ClaudeAgent):
     def invoke(
         self,
         prompt: str,
-        timeout: int = 1800,
+        timeout: int | None = 1800,
         output_file: Path | None = None,
         crash_patterns: list[str] | None = None,
     ) -> AgentResult:
@@ -702,7 +702,7 @@ class CrashThenOkAgent:
     def invoke(
         self,
         prompt: str,
-        timeout: int = 1800,
+        timeout: int | None = 1800,
         output_file: Path | None = None,
         crash_patterns: list[str] | None = None,
     ) -> AgentResult:
@@ -714,6 +714,9 @@ class CrashThenOkAgent:
 
     def is_exhausted(self, result: AgentResult) -> bool:
         return False
+
+    def exhaustion_reason(self, result: AgentResult) -> str | None:
+        return None
 
 
 class ErrorPatternAgent:
@@ -729,7 +732,7 @@ class ErrorPatternAgent:
     def invoke(
         self,
         prompt: str,
-        timeout: int = 1800,
+        timeout: int | None = 1800,
         output_file: Path | None = None,
         crash_patterns: list[str] | None = None,
     ) -> AgentResult:
@@ -737,6 +740,9 @@ class ErrorPatternAgent:
 
     def is_exhausted(self, result: AgentResult) -> bool:
         return False
+
+    def exhaustion_reason(self, result: AgentResult) -> str | None:
+        return None
 
 
 class SuccessAgent:
@@ -752,7 +758,7 @@ class SuccessAgent:
     def invoke(
         self,
         prompt: str,
-        timeout: int = 1800,
+        timeout: int | None = 1800,
         output_file: Path | None = None,
         crash_patterns: list[str] | None = None,
     ) -> AgentResult:
@@ -760,6 +766,9 @@ class SuccessAgent:
 
     def is_exhausted(self, result: AgentResult) -> bool:
         return False
+
+    def exhaustion_reason(self, result: AgentResult) -> str | None:
+        return None
 
 
 class EmptySuccessAgent:
@@ -775,7 +784,7 @@ class EmptySuccessAgent:
     def invoke(
         self,
         prompt: str,
-        timeout: int = 1800,
+        timeout: int | None = 1800,
         output_file: Path | None = None,
         crash_patterns: list[str] | None = None,
     ) -> AgentResult:
@@ -783,6 +792,9 @@ class EmptySuccessAgent:
 
     def is_exhausted(self, result: AgentResult) -> bool:
         return False
+
+    def exhaustion_reason(self, result: AgentResult) -> str | None:
+        return None
 
 
 class NonZeroWithOutputAgent:
@@ -798,7 +810,7 @@ class NonZeroWithOutputAgent:
     def invoke(
         self,
         prompt: str,
-        timeout: int = 1800,
+        timeout: int | None = 1800,
         output_file: Path | None = None,
         crash_patterns: list[str] | None = None,
     ) -> AgentResult:
@@ -806,6 +818,9 @@ class NonZeroWithOutputAgent:
 
     def is_exhausted(self, result: AgentResult) -> bool:
         return False
+
+    def exhaustion_reason(self, result: AgentResult) -> str | None:
+        return None
 
 
 class TestCrashHandling:
@@ -1028,7 +1043,7 @@ class TestCrashHandling:
             def invoke(
                 self,
                 prompt: str,
-                timeout: int = 1800,
+                timeout: int | None = 1800,
                 output_file: Path | None = None,
                 crash_patterns: list[str] | None = None,
             ) -> AgentResult:

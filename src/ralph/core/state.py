@@ -104,7 +104,7 @@ def get_state_path(root: Path | None = None) -> Path:
 
 
 def _coerce_int(value: object, default: int) -> int:
-    if isinstance(value, (int, str)):
+    if isinstance(value, int | str):
         try:
             return int(value)
         except ValueError:

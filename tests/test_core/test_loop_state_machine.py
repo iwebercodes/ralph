@@ -75,7 +75,7 @@ class MockAgent:
     def invoke(
         self,
         prompt: str,
-        timeout: int = 1800,
+        timeout: int | None = 1800,
         output_file: Path | None = None,
         crash_patterns: list[str] | None = None,
     ) -> AgentResult:
@@ -97,6 +97,9 @@ class MockAgent:
 
     def is_exhausted(self, result: AgentResult) -> bool:
         return False
+
+    def exhaustion_reason(self, result: AgentResult) -> str | None:
+        return None
 
 
 class TestStaleStatusBug:

@@ -48,4 +48,4 @@ def should_ignore(path: str | Path, spec: pathspec.PathSpec) -> bool:
     """Check if a path should be ignored."""
     # Normalize Windows separators so gitignore-style matching is stable cross-platform.
     path_str = PurePosixPath(str(path).replace("\\", "/")).as_posix()
-    return spec.match_file(path_str)
+    return bool(spec.match_file(path_str))

@@ -128,8 +128,8 @@ class MockPi:
         if result.exit_code == 0:
             return False
         error = result.error or ""
-        for pattern, _ in [(
-            r"model is not available", "model not available"),
+        for pattern, _ in [
+            (r"model is not available", "model not available"),
             (r"no available model", "no available model"),
             (r"api[_\-]?key is not set", "API key not configured"),
             (r"rate[_\-]?limit", "rate limit exceeded"),
@@ -137,6 +137,7 @@ class MockPi:
             (r"429 Too Many Requests", "429 Too Many Requests"),
         ]:
             import re
+
             if re.search(pattern, error, re.IGNORECASE):
                 return True
         return False
@@ -146,9 +147,29 @@ class MockPi:
         if result.exit_code == 0:
             return None
         error = result.error or ""
+        for pattern, reason in [
+            (r"model is not available", "model not available"),
+            (r"no available model", "no available model"),
+            (r"api[_\-]?key is not set", "API key not configured"),
+            (r"rate[_\-]?limit", "rate limit exceeded"),
+            (r"quota exceeded", "quota exceeded"),
+            (r"429 Too Many Requests", "429 Too Many Requests"),
+        ]:
+            import re
+
+            if re.search(pattern, error, re.IGNORECASE):
+                return reason
+        return None
+
+    def exhaustion_reason(self, result: AgentResult) -> str | None:
+        """Return a human-readable Pi exhaustion reason."""
+        if result.exit_code == 0:
+            return None
+        error = result.error or ""
         import re
-        for pattern, reason in [(
-            r"model is not available", "model not available"),
+
+        for pattern, reason in [
+            (r"model is not available", "model not available"),
             (r"no available model", "no available model"),
             (r"api[_\-]?key is not set", "API key not configured"),
             (r"rate[_\-]?limit", "rate limit exceeded"),
