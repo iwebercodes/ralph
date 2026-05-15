@@ -20,9 +20,11 @@ from ralph.core.specs import Spec, discover_specs, read_spec_content
 from ralph.core.state import (
     get_handoff_path,
     is_initialized,
+    load_run_config,
     read_guardrails,
     read_handoff,
     read_state,
+    save_run_config,
 )
 from ralph.output.console import Console
 
@@ -59,7 +61,9 @@ def run(
         hidden=True,
         callback=about_callback,
     ),
-    max_iterations: int = typer.Option(20, "--max", "-m", help="Maximum number of iterations"),
+    max_iterations: int | None = typer.Option(
+        None, "--max", "-m", help="Maximum number of iterations (default: 20)"
+    ),
     agents: str | None = typer.Option(
         None,
         "--agents",
@@ -67,14 +71,20 @@ def run(
         help="Comma-separated agent names (e.g. 'claude', 'codex', 'pi')",
     ),
     timeout: int | None = typer.Option(
-        10800, "--timeout", help="Timeout per rotation in seconds (default: 3 hours)"
+        None, "--timeout", help="Timeout per rotation in seconds (default: 3 hours)"
     ),
-    no_timeout: bool = typer.Option(
-        False, "--no-timeout", help="Disable timeout entirely (run until completion)"
+    no_timeout: bool | None = typer.Option(
+        None, "--no-timeout", help="Disable timeout entirely (run until completion)"
     ),
     no_color: bool = typer.Option(False, "--no-color", help="Disable colored output"),
     filter_spec: str | None = typer.Option(
         None, "--filter", help="Filter specs by substring match in filename"
+    ),
+    continue_run: bool = typer.Option(
+        False,
+        "--continue",
+        "-c",
+        help="Resume a previously interrupted run using saved configuration",
     ),
     debug_prompt: bool = typer.Option(
         False,
@@ -85,6 +95,36 @@ def run(
     """Execute the Ralph loop until completion or max iterations."""
     root = Path.cwd()
     console = Console(no_color=no_color)
+
+    # Resolve option values with --continue support
+    final_max = max_iterations if max_iterations is not None else 20
+    final_agents = agents
+    final_timeout = timeout if timeout is not None else 10800
+    final_no_timeout = no_timeout if no_timeout is not None else False
+    final_filter = filter_spec
+
+    if continue_run:
+        saved = load_run_config(root)
+        if saved is None:
+            console.error(
+                "No previous run configuration found",
+                "Run: ralph run [OPTIONS] first to establish a configuration",
+            )
+            raise typer.Exit(1)
+
+        # Apply saved defaults, then override with explicit CLI flags
+        if max_iterations is None:
+            final_max = int(saved["max_iterations"])
+        if agents is None:
+            _saved_agents: str | None = saved.get("agents")  # noqa: F841
+            final_agents = _saved_agents
+        if timeout is None:
+            final_timeout = int(saved["timeout"])
+        if no_timeout is None:
+            final_no_timeout = bool(saved["no_timeout"])
+        if filter_spec is None:
+            _saved_filter: str | None = saved.get("filter")  # noqa: F841
+            final_filter = _saved_filter
 
     # Prerequisites check
     if not is_initialized(root):
@@ -104,11 +144,11 @@ See docs: docs/writing-prompts.md"""
         console.error("No spec files found", hint)
         raise typer.Exit(1)
 
-    specs = _filter_specs(filter_spec, specs)
-    if filter_spec is not None and not specs:
+    specs = _filter_specs(final_filter, specs)
+    if final_filter is not None and not specs:
         all_specs = discover_specs(root)
         console.error(
-            f"No specs match filter: '{filter_spec}'",
+            f"No specs match filter: '{final_filter}'",
             f"Available specs: {', '.join(s.path.name for s in all_specs)}",
         )
         raise typer.Exit(1)
@@ -133,6 +173,16 @@ See docs: docs/writing-prompts.md"""
             raise typer.Exit(1)
         delete_run_state(root)
 
+    # Save run configuration at the start (before any work begins)
+    save_run_config(
+        agents=final_agents,
+        max_iterations=final_max,
+        timeout=final_timeout,
+        no_timeout=final_no_timeout,
+        filter_spec=final_filter,
+        root=root,
+    )
+
     # Handle debug-prompt mode (no sleep prevention, no agents invoked)
     if debug_prompt:
         with NoSleep(debug_prompt=True):
@@ -153,7 +203,7 @@ See docs: docs/writing-prompts.md"""
             # Assemble the prompt
             prompt = assemble_prompt(
                 iteration=iteration,
-                max_iter=max_iterations,
+                max_iter=final_max,
                 done_count=done_count,
                 goal=spec_goal,
                 handoff=handoff,
@@ -171,11 +221,11 @@ See docs: docs/writing-prompts.md"""
         _run_main_loop(
             root=root,
             console=console,
-            max_iterations=max_iterations,
-            agents=agents,
-            timeout=timeout,
-            no_timeout=no_timeout,
-            filter_spec=filter_spec,
+            max_iterations=final_max,
+            agents=final_agents,
+            timeout=final_timeout,
+            no_timeout=final_no_timeout,
+            filter_spec=final_filter,
         )
 
 

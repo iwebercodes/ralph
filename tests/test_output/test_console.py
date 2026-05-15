@@ -513,3 +513,142 @@ class TestConsoleTTY:
         assert "rate limited" in output.lower()
         assert "ralph run" in output
         assert "─" in output
+
+
+class TestConsoleHistoryList:
+    """Tests for history_list rendering."""
+
+    def test_history_list_non_tty(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Test history list for non-TTY output."""
+        console = Console(no_color=True)
+        entries = [
+            (1, "2025-01-19T14:30:00+00:00", "DONE", 3, True),
+            (2, "2025-01-19T15:00:00+00:00", "ROTATE", 1, False),
+        ]
+        console.history_list(entries)
+        output = capsys.readouterr().out
+        assert "[ralph] ─── History ───" in output
+        assert "1. DONE (3 files changed) [COMPLETE]" in output
+        assert "2. ROTATE (1 file changed)" in output
+
+    def test_history_list_non_tty_no_changes(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Test history list with zero changes for non-TTY."""
+        console = Console(no_color=True)
+        entries = [(1, "2025-01-19T14:30:00+00:00", "CONTINUE", 0, False)]
+        console.history_list(entries)
+        output = capsys.readouterr().out
+        assert "no changes" in output
+
+    def test_history_list_tty(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Test history list for TTY output."""
+        console = Console(no_color=True)
+        console._is_tty = True
+        entries = [
+            (1, "2025-01-19T14:30:00+00:00", "DONE", 3, True),
+            (2, "2025-01-19T15:00:00+00:00", "STUCK", 0, False),
+        ]
+        console.history_list(entries)
+        output = capsys.readouterr().out
+        assert "Ralph History" in output
+        assert "DONE" in output
+        assert "COMPLETE" in output
+        assert "STUCK" in output
+        assert "───" in output  # box bottom
+
+    def test_history_list_tty_empty(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Test history list with no entries for TTY."""
+        console = Console(no_color=True)
+        console._is_tty = True
+        console.history_list([])
+        output = capsys.readouterr().out
+        assert "Ralph History" in output
+        assert "───" in output  # box bottom
+
+    def test_history_list_non_tty_no_timestamp(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Test history list with missing timestamp for non-TTY."""
+        console = Console(no_color=True)
+        entries = [(1, None, "ROTATE", 2, False)]
+        console.history_list(entries)
+        output = capsys.readouterr().out
+        assert "ROTATE" in output
+
+    def test_print_method(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Test the print method wrapper."""
+        console = Console(no_color=True)
+        console.print("hello world")
+        output = capsys.readouterr().out
+        assert "hello world" in output
+
+    def test_print_method_empty(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Test the print method with no arguments."""
+        console = Console(no_color=True)
+        console.print()
+        output = capsys.readouterr().out
+        assert output.strip() == ""  # prints just a newline
+
+    def test_status_display_tty(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Test status display for TTY output."""
+        console = Console(no_color=True)
+        console._is_tty = True
+        console.status_display(5, 20, Status.ROTATE, 1, goal_preview="Add tests")
+        output = capsys.readouterr().out
+        assert "Ralph Status" in output
+        assert "Iteration:" in output
+        assert "Last signal:" in output
+        assert "Verification:" in output
+        assert "Goal:" in output
+        assert "Next:" in output
+        assert "───" in output  # box bottom
+
+    def test_status_display_tty_done(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Test status display with DONE status for TTY."""
+        console = Console(no_color=True)
+        console._is_tty = True
+        console.status_display(10, 20, Status.DONE, 3)
+        output = capsys.readouterr().out
+        assert "DONE" in output
+        assert "3/3 [●●●]" in output
+
+    def test_status_display_non_tty(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Test status display for non-TTY output."""
+        console = Console(no_color=True)
+        console.status_display(5, 20, Status.CONTINUE, 0)
+        output = capsys.readouterr().out
+        assert "[ralph] Status:" in output
+        assert "CONTINUE" in output
+
+    def test_status_display_non_tty_no_verification(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Test status display without verification for non-TTY."""
+        console = Console(no_color=True)
+        console.status_display(1, 20, Status.CONTINUE, 0)
+        output = capsys.readouterr().out
+        assert "Verification:" not in output
+
+    def test_history_list_tty_unknown_status(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Test history list with unknown status for TTY."""
+        console = Console(no_color=True)
+        console._is_tty = True
+        entries = [(1, None, "UNKNOWN", 0, False)]
+        console.history_list(entries)
+        output = capsys.readouterr().out
+        assert "UNKNOWN" in output  # Unknown status string is shown as-is
+
+    def test_history_list_tty_no_timestamp(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Test history list with no timestamp for TTY."""
+        console = Console(no_color=True)
+        console._is_tty = True
+        entries = [(1, None, "DONE", 0, True)]
+        console.history_list(entries)
+        output = capsys.readouterr().out
+        assert "??:??" in output  # Fallback timestamp format
+
+    def test_history_list_non_tty_one_file(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Test history list with exactly one file changed for non-TTY."""
+        console = Console(no_color=True)
+        entries = [(1, "2025-01-19T14:30:00+00:00", "DONE", 1, True)]
+        console.history_list(entries)
+        output = capsys.readouterr().out
+        assert "1 file changed" in output
+        assert "[COMPLETE]" in output

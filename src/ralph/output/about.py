@@ -45,7 +45,7 @@ COMMANDS
       --force: Overwrite existing .ralph/ directory
 
   ralph run [--max N] [--agents NAMES] [--timeout SECS] [--no-timeout]
-            [--no-color] [--filter SUBSTR] [--debug-prompt]
+            [--no-color] [--filter SUBSTR] [--continue] [--debug-prompt]
       Execute rotations until the goal is complete.
       --max N: Maximum iterations (default: 20)
       --agents: Comma-separated agent names to use (e.g., "claude,codex")

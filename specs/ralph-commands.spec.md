@@ -184,6 +184,7 @@ Ralph provides six main commands for managing and executing AI-driven developmen
 - `--timeout` (int, default: 10800): Timeout per rotation in seconds (default: 3 hours)
 - `--no-timeout` (bool, default: false): Disable timeout entirely (run until completion)
 - `--no-color` (bool, default: false): Disable colored output
+- `--continue` / `-c` (bool, default: false): Resume a previously interrupted run using saved configuration
 - `--filter` (str, optional): Filter specs by substring match in filename
 - `--debug-prompt` (bool, default: false): Output the fully constructed prompt to stdout instead of executing agents, then exit
 
@@ -227,11 +228,26 @@ Ralph provides six main commands for managing and executing AI-driven developmen
 - Useful for debugging prompt construction and testing with external tools
 - Example usage: `ralph run --filter "auth.spec.md" --debug-prompt | claude`
 
+**Continue Behavior (`--continue`)**:
+- When `--continue` is used, Ralph reads saved configuration from `.ralph/run_config.json` in the project root
+- Saved configuration includes: `--agents`, `--max`, `--timeout`/`--no-timeout`, `--filter`
+- The saved configuration is applied as defaults, matching exactly what was used in the previous `ralph run` invocation
+- Explicit flags on the command line **override** saved values (e.g., `ralph run --continue --max 50` uses saved agents but max=50)
+- If no saved configuration exists when `--continue` is used, Ralph shows an error and exits with code 1:
+  ```
+  No previous run configuration found
+  Run: ralph run [OPTIONS] first to establish a configuration
+  ```
+- Configuration is saved atomically at the **start** of each `ralph run` (before any work begins), so it always reflects the actual CLI arguments used
+- Configuration is per-directory: running in different folders saves/loads independently
+- Example: If folder 1 had `ralph run --agents pi --max 10`, then `ralph run --continue` in folder 1 behaves identically to that original invocation
+- Example: If folder 2 had `ralph run --filter PROMPT.md`, then `ralph run --continue` in folder 2 behaves identically to that original invocation
+
 **Agent Selection**:
 - Checks agent availability (API keys, rate limits)
 - Falls back to available agents if requested agent unavailable
 - Shows warning if no agents available
-- Supports 'claude' and 'codex' agents
+- Supports 'claude', 'codex', and 'pi' agents
 
 **Error Cases**:
 - Ralph not initialized
@@ -239,6 +255,7 @@ Ralph provides six main commands for managing and executing AI-driven developmen
 - No agents available
 - No specs match filter criteria
 - Timeout exceeded (if not disabled)
+- `--continue` used but no saved configuration exists
 
 **Implementation Note**:
 The filter logic must be applied within the rotation loop itself, not just during initial validation. On each rotation, the execution loop must:
@@ -349,7 +366,15 @@ Commands interact consistently with Ralph's state system for progress tracking a
    - **MUST TEST**: `ralph reset` preserves guardrails, history, counters, handoffs by default
    - **MUST TEST**: Each `--reset-*` flag works independently
    - **MUST TEST**: Combined flags work together
-10. **Spec-Implementation Alignment**: Implementation must exactly match this specification:
+10. **Continue Behavior**: `--continue` option correctly saves and restores run configuration:
+   - **MUST TEST**: Running `ralph run --agents pi --max 10` saves configuration to `.ralph/run_config.json`
+   - **MUST TEST**: `ralph run --continue` in the same directory restores saved agents and max iterations
+   - **MUST TEST**: Explicit flags override saved values (`--continue --max 50` uses max=50 but saved agents)
+   - **MUST TEST**: `--continue` with no saved config shows error and exits with code 1
+   - **MUST TEST**: Different directories maintain independent configurations
+   - **MUST TEST**: Configuration is saved before any work begins (even if run is immediately interrupted)
+   - **MUST TEST**: `--no-timeout` flag is correctly saved and restored as a boolean
+11. **Spec-Implementation Alignment**: Implementation must exactly match this specification:
    - No command behavior exists that is not described in this spec
    - When commands or options are removed from spec, they must be removed from implementation
    - When commands or options are added to spec, they must be added to implementation

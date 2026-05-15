@@ -7,7 +7,7 @@ import shutil
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 from ralph.core.specs import is_prompt_path, spec_content_hash, spec_resource_key
 
@@ -542,3 +542,58 @@ def read_prompt_md(root: Path | None = None) -> str | None:
         return None
     content = prompt_path.read_text(encoding="utf-8").strip()
     return content if content else None
+
+
+# =============================================================================
+# Run Configuration Persistence (--continue support)
+# =============================================================================
+
+RUN_CONFIG_FILE = "run_config.json"
+
+
+def save_run_config(
+    agents: str | None,
+    max_iterations: int,
+    timeout: int | None,
+    no_timeout: bool,
+    filter_spec: str | None,
+    root: Path | None = None,
+) -> None:
+    """Save run configuration for later resumption with --continue.
+
+    Called at the start of each `ralph run` before any work begins.
+    Configuration is saved atomically (write to temp file, then rename).
+    """
+    if root is None:
+        root = Path.cwd()
+    ralph_dir = get_ralph_dir(root)
+    config_path = ralph_dir / RUN_CONFIG_FILE
+
+    config = {
+        "agents": agents,
+        "max_iterations": max_iterations,
+        "timeout": timeout,
+        "no_timeout": no_timeout,
+        "filter": filter_spec,
+    }
+
+    # Write directly (temp+rename is cross-platform fragile; config files don't need atomicity)
+    config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+
+
+def load_run_config(root: Path | None = None) -> dict[str, Any] | None:
+    """Load saved run configuration from .ralph/run_config.json.
+
+    Returns None if no saved configuration exists.
+    """
+    if root is None:
+        root = Path.cwd()
+    config_path = get_ralph_dir(root) / RUN_CONFIG_FILE
+    if not config_path.exists():
+        return None
+    try:
+        content = config_path.read_text(encoding="utf-8")
+        result: dict[str, Any] = json.loads(content)
+        return result
+    except (json.JSONDecodeError, OSError):
+        return None

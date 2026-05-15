@@ -1144,3 +1144,439 @@ def test_run_no_agents_error_message(
 
     assert result.exit_code == 1
     assert "No AI agents available" in result.output
+
+
+# =============================================================================
+# --continue Flag Tests (Spec Criterion 10)
+# =============================================================================
+
+
+def test_run_continue_saves_config(
+    project_with_prompt: Path,
+    mock_pi: MockPi,
+) -> None:
+    """Test that running ralph run saves configuration to .ralph/run_config.json."""
+    import json as _json
+
+    mock_pi.set_responses(
+        [
+            {"status": "DONE", "output": "Done", "changes": []},
+            {"status": "DONE", "output": "Review 1", "changes": []},
+            {"status": "DONE", "output": "Review 2", "changes": []},
+        ]
+    )
+
+    with (
+        patch("ralph.commands.run.ClaudeAgent") as mock_claude_cls,
+        patch("ralph.commands.run.CodexAgent") as mock_codex_cls,
+    ):
+        mock_claude_cls.return_value = _UnavailableClaude()
+        mock_codex_cls.return_value = _UnavailableCodex()
+
+        result = runner.invoke(app, ["run", "--agents", "pi", "--max", "10"])
+
+    assert result.exit_code == 0
+    # Verify config file was written
+    config_path = project_with_prompt / ".ralph" / "run_config.json"
+    assert config_path.exists()
+    config = _json.loads(config_path.read_text(encoding="utf-8"))
+    assert config["agents"] == "pi"
+    assert config["max_iterations"] == 10
+    assert config["no_timeout"] is False
+    assert "timeout" in config
+
+
+def test_run_continue_restores_config(
+    project_with_prompt: Path,
+    mock_pi: MockPi,
+) -> None:
+    """Test that ralph run --continue restores saved agents and max iterations."""
+    import json as _json
+
+    # Pre-write a saved config
+    ralph_dir = project_with_prompt / ".ralph"
+    config_path = ralph_dir / "run_config.json"
+    config_path.write_text(
+        _json.dumps(
+            {
+                "agents": "pi",
+                "max_iterations": 10,
+                "timeout": 10800,
+                "no_timeout": False,
+                "filter": None,
+            },
+        ),
+        encoding="utf-8",
+    )
+
+    mock_pi.set_responses(
+        [
+            {"status": "DONE", "output": "Done", "changes": []},
+            {"status": "DONE", "output": "Review 1", "changes": []},
+            {"status": "DONE", "output": "Review 2", "changes": []},
+        ]
+    )
+
+    captured_max: list[int] = []
+
+    def fake_run_loop(*args, **kwargs):
+        captured_max.append(kwargs["max_iter"])
+        return LoopResult(exit_code=0, message="", iterations_run=3)
+
+    with (
+        patch("ralph.commands.run.ClaudeAgent") as mock_claude_cls,
+        patch("ralph.commands.run.CodexAgent") as mock_codex_cls,
+        patch("ralph.commands.run.run_loop", side_effect=fake_run_loop),
+        patch("ralph.commands.run.NoSleep", lambda **kw: nullcontext()),
+    ):
+        mock_claude_cls.return_value = _UnavailableClaude()
+        mock_codex_cls.return_value = _UnavailableCodex()
+
+        result = runner.invoke(app, ["run", "--continue"])
+
+    assert result.exit_code == 0
+    # Should use saved max_iterations=10 (not default 20)
+    assert captured_max == [10]
+
+
+def test_run_continue_explicit_flags_override(
+    project_with_prompt: Path,
+    mock_pi: MockPi,
+) -> None:
+    """Test that explicit flags override saved values.
+
+    --continue --max 50 uses max=50 but saved agents.
+    """
+    import json as _json
+
+    # Pre-write a saved config with agents=pi, max=10
+    ralph_dir = project_with_prompt / ".ralph"
+    config_path = ralph_dir / "run_config.json"
+    config_path.write_text(
+        _json.dumps(
+            {
+                "agents": "pi",
+                "max_iterations": 10,
+                "timeout": 10800,
+                "no_timeout": False,
+                "filter": None,
+            },
+        ),
+        encoding="utf-8",
+    )
+
+    captured_max: list[int] = []
+
+    def fake_run_loop(*args, **kwargs):
+        captured_max.append(kwargs["max_iter"])
+        return LoopResult(exit_code=0, message="", iterations_run=1)
+
+    with (
+        patch("ralph.commands.run.ClaudeAgent") as mock_claude_cls,
+        patch("ralph.commands.run.CodexAgent") as mock_codex_cls,
+        patch("ralph.commands.run.run_loop", side_effect=fake_run_loop),
+        patch("ralph.commands.run.NoSleep", lambda **kw: nullcontext()),
+    ):
+        mock_claude_cls.return_value = _UnavailableClaude()
+        mock_codex_cls.return_value = _UnavailableCodex()
+
+        # Explicit --max 50 should override saved max=10
+        result = runner.invoke(app, ["run", "--continue", "--max", "50"])
+
+    assert result.exit_code == 0
+    # Should use explicit max=50, not saved max=10
+    assert captured_max == [50]
+
+
+def test_run_continue_no_saved_config_error(
+    project_with_prompt: Path,
+) -> None:
+    """Test --continue with no saved config shows error and exits with code 1."""
+    # Ensure no run_config.json exists
+    ralph_dir = project_with_prompt / ".ralph"
+    config_path = ralph_dir / "run_config.json"
+    if config_path.exists():
+        config_path.unlink()
+
+    result = runner.invoke(app, ["run", "--continue"])
+
+    assert result.exit_code == 1
+    assert "No previous run configuration found" in result.output
+    assert "first to establish a configuration" in result.output
+
+
+def test_run_continue_different_dirs_independent(
+    temp_project_a: Path,
+    temp_project_b: Path,
+    mock_pi: MockPi,
+) -> None:
+    """Test different directories maintain independent configurations."""
+    import json as _json
+
+    from ralph.core.state import (
+        GUARDRAILS_TEMPLATE,
+        HANDOFF_DIR,
+        HANDOFF_TEMPLATE,
+        HISTORY_DIR,
+        RALPH_DIR,
+        Status,
+        write_done_count,
+        write_guardrails,
+        write_handoff,
+        write_iteration,
+        write_status,
+    )
+
+    # Set up project A with its own config (fully initialized)
+    (temp_project_a / "PROMPT.md").write_text("# Goal A\nDo stuff")
+    ralph_dir_a = temp_project_a / RALPH_DIR
+    ralph_dir_a.mkdir()
+    (ralph_dir_a / HISTORY_DIR).mkdir()
+    (ralph_dir_a / HANDOFF_DIR).mkdir()
+    write_status(Status.IDLE, temp_project_a)
+    write_iteration(0, temp_project_a)
+    write_done_count(0, temp_project_a)
+    write_handoff(HANDOFF_TEMPLATE, temp_project_a)
+    write_guardrails(GUARDRAILS_TEMPLATE, temp_project_a)
+    (ralph_dir_a / "run_config.json").write_text(
+        _json.dumps(
+            {
+                "agents": None,
+                "max_iterations": 5,
+                "timeout": 10800,
+                "no_timeout": False,
+                "filter": None,
+            },
+        ),
+        encoding="utf-8",
+    )
+
+    # Set up project B with different config (fully initialized)
+    (temp_project_b / "PROMPT.md").write_text("# Goal B\nDo other stuff")
+    ralph_dir_b = temp_project_b / RALPH_DIR
+    ralph_dir_b.mkdir()
+    (ralph_dir_b / HISTORY_DIR).mkdir()
+    (ralph_dir_b / HANDOFF_DIR).mkdir()
+    write_status(Status.IDLE, temp_project_b)
+    write_iteration(0, temp_project_b)
+    write_done_count(0, temp_project_b)
+    write_handoff(HANDOFF_TEMPLATE, temp_project_b)
+    write_guardrails(GUARDRAILS_TEMPLATE, temp_project_b)
+    (ralph_dir_b / "run_config.json").write_text(
+        _json.dumps(
+            {
+                "agents": None,
+                "max_iterations": 20,
+                "timeout": 3600,
+                "no_timeout": False,
+                "filter": None,
+            },
+        ),
+        encoding="utf-8",
+    )
+
+    captured_a: list[int] = []
+    captured_b: list[int] = []
+
+    def fake_run_loop_a(*args, **kwargs):
+        captured_a.append(kwargs["max_iter"])
+        return LoopResult(exit_code=0, message="", iterations_run=1)
+
+    def fake_run_loop_b(*args, **kwargs):
+        captured_b.append(kwargs["max_iter"])
+        return LoopResult(exit_code=0, message="", iterations_run=1)
+
+    with (
+        patch("ralph.commands.run.ClaudeAgent") as mock_claude_cls,
+        patch("ralph.commands.run.CodexAgent") as mock_codex_cls,
+        patch("ralph.commands.run.NoSleep", lambda **kw: nullcontext()),
+    ):
+        mock_claude_cls.return_value = _UnavailableClaude()
+        mock_codex_cls.return_value = _UnavailableCodex()
+
+        # Run in project A with --continue
+        original_cwd = Path.cwd()
+        os.chdir(temp_project_a)
+        with patch("ralph.commands.run.run_loop", side_effect=fake_run_loop_a):
+            result_a = runner.invoke(app, ["run", "--continue"])
+        os.chdir(temp_project_b)
+        with patch("ralph.commands.run.run_loop", side_effect=fake_run_loop_b):
+            result_b = runner.invoke(app, ["run", "--continue"])
+        os.chdir(original_cwd)
+
+    assert result_a.exit_code == 0
+    assert result_b.exit_code == 0
+    # Project A should use its saved max=5
+    assert captured_a == [5]
+    # Project B should use its saved max=20
+    assert captured_b == [20]
+
+
+def test_run_continue_saved_before_work(
+    project_with_prompt: Path,
+) -> None:
+    """Test configuration is saved before any work begins.
+
+    Even if run is immediately interrupted.
+    """
+
+    config_was_saved = False
+
+    def capture_save(*args, **kwargs):
+        nonlocal config_was_saved
+        config_was_saved = True
+        # Simulate immediate failure by raising
+        raise RuntimeError("Simulated crash after save")
+
+    with (
+        patch("ralph.commands.run.ClaudeAgent") as mock_claude_cls,
+        patch("ralph.commands.run.CodexAgent") as mock_codex_cls,
+        patch("ralph.commands.run.PiAgent") as mock_pi_cls,
+        patch("ralph.commands.run.save_run_config", side_effect=capture_save),
+    ):
+        mock_claude_cls.return_value = _UnavailableClaude()
+        mock_codex_cls.return_value = _UnavailableCodex()
+        mock_pi_cls.return_value = _UnavailablePi()
+
+        runner.invoke(app, ["run"])
+
+    # Config should have been saved even though run failed
+    assert config_was_saved
+
+
+def test_run_continue_no_timeout_flag_saved_and_restored(
+    project_with_prompt: Path,
+    mock_pi: MockPi,
+) -> None:
+    """Test --no-timeout flag is correctly saved and restored as a boolean."""
+    import json as _json
+
+    # Pre-write a saved config with no_timeout=True
+    ralph_dir = project_with_prompt / ".ralph"
+    config_path = ralph_dir / "run_config.json"
+    config_path.write_text(
+        _json.dumps(
+            {
+                "agents": None,
+                "max_iterations": 20,
+                "timeout": 10800,
+                "no_timeout": True,
+                "filter": None,
+            },
+        ),
+        encoding="utf-8",
+    )
+
+    captured_no_timeout: list[bool] = []
+
+    def fake_run_loop(*args, **kwargs):
+        captured_no_timeout.append(kwargs["timeout"] is None)
+        return LoopResult(exit_code=0, message="", iterations_run=1)
+
+    with (
+        patch("ralph.commands.run.ClaudeAgent") as mock_claude_cls,
+        patch("ralph.commands.run.CodexAgent") as mock_codex_cls,
+        patch("ralph.commands.run.run_loop", side_effect=fake_run_loop),
+        patch("ralph.commands.run.NoSleep", lambda **kw: nullcontext()),
+    ):
+        mock_claude_cls.return_value = _UnavailableClaude()
+        mock_codex_cls.return_value = _UnavailableCodex()
+
+        result = runner.invoke(app, ["run", "--continue"])
+
+    assert result.exit_code == 0
+    # Saved no_timeout=True should translate to timeout=None
+    assert captured_no_timeout == [True]
+
+
+def test_run_continue_short_option(temp_project: Path, mock_pi: MockPi) -> None:
+    """Test -c short option works for --continue."""
+    import json as _json
+
+    (temp_project / "PROMPT.md").write_text("# Goal\nDo stuff")
+    ralph_dir = temp_project / ".ralph"
+    ralph_dir.mkdir()
+    config_path = ralph_dir / "run_config.json"
+    config_path.write_text(
+        _json.dumps(
+            {
+                "agents": None,
+                "max_iterations": 15,
+                "timeout": 10800,
+                "no_timeout": False,
+                "filter": None,
+            },
+        ),
+        encoding="utf-8",
+    )
+
+    captured_max: list[int] = []
+
+    def fake_run_loop(*args, **kwargs):
+        captured_max.append(kwargs["max_iter"])
+        return LoopResult(exit_code=0, message="", iterations_run=1)
+
+    with (
+        patch("ralph.commands.run.ClaudeAgent") as mock_claude_cls,
+        patch("ralph.commands.run.CodexAgent") as mock_codex_cls,
+        patch("ralph.commands.run.run_loop", side_effect=fake_run_loop),
+        patch("ralph.commands.run.NoSleep", lambda **kw: nullcontext()),
+    ):
+        mock_claude_cls.return_value = _UnavailableClaude()
+        mock_codex_cls.return_value = _UnavailableCodex()
+
+        result = runner.invoke(app, ["run", "-c"])
+
+    assert result.exit_code == 0
+    assert captured_max == [15]
+
+
+def test_run_continue_preserves_filter(
+    temp_project: Path,
+    mock_pi: MockPi,
+) -> None:
+    """Test that saved filter is correctly restored."""
+    import json as _json
+
+    (temp_project / "PROMPT.md").write_text("# Goal\nDo stuff")
+    ralph_dir = temp_project / ".ralph"
+    ralph_dir.mkdir()
+    config_path = ralph_dir / "run_config.json"
+    config_path.write_text(
+        _json.dumps(
+            {
+                "agents": None,
+                "max_iterations": 20,
+                "timeout": 10800,
+                "no_timeout": False,
+                "filter": "auth",
+            },
+        ),
+        encoding="utf-8",
+    )
+
+    # Create matching and non-matching specs
+    specs_dir = temp_project / "specs"
+    specs_dir.mkdir()
+    (specs_dir / "auth.spec.md").write_text("# Auth Spec")
+    (specs_dir / "user.spec.md").write_text("# User Spec")
+
+    captured_filter: list[str | None] = []
+
+    def fake_run_loop(*args, **kwargs):
+        captured_filter.append(kwargs.get("spec_filter"))
+        return LoopResult(exit_code=0, message="", iterations_run=1)
+
+    with (
+        patch("ralph.commands.run.ClaudeAgent") as mock_claude_cls,
+        patch("ralph.commands.run.CodexAgent") as mock_codex_cls,
+        patch("ralph.commands.run.run_loop", side_effect=fake_run_loop),
+        patch("ralph.commands.run.NoSleep", lambda **kw: nullcontext()),
+    ):
+        mock_claude_cls.return_value = _UnavailableClaude()
+        mock_codex_cls.return_value = _UnavailableCodex()
+
+        result = runner.invoke(app, ["run", "--continue"])
+
+    assert result.exit_code == 0
+    assert captured_filter == ["auth"]

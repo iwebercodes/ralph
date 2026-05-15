@@ -42,6 +42,38 @@ def temp_project(tmp_path: Path) -> Generator[Path, None, None]:
 
 
 @pytest.fixture
+def temp_project_a(tmp_path: Path) -> Generator[Path, None, None]:
+    """Create a temporary project directory A (for multi-dir tests).
+
+    Uses a subdirectory so it's independent from tmp_path and from temp_project_b.
+    """
+    project_dir = tmp_path / "project_a"
+    project_dir.mkdir(parents=True)
+    original_cwd = Path.cwd()
+    os.chdir(project_dir)
+    try:
+        yield project_dir
+    finally:
+        os.chdir(original_cwd)
+
+
+@pytest.fixture
+def temp_project_b(tmp_path: Path) -> Generator[Path, None, None]:
+    """Create a temporary project directory B (for multi-dir tests).
+
+    Uses a subdirectory so it's independent from tmp_path and from temp_project_a.
+    """
+    project_dir = tmp_path / "project_b"
+    project_dir.mkdir(parents=True)
+    original_cwd = Path.cwd()
+    os.chdir(project_dir)
+    try:
+        yield project_dir
+    finally:
+        os.chdir(original_cwd)
+
+
+@pytest.fixture
 def initialized_project(temp_project: Path) -> Path:
     """Create a temporary project with Ralph initialized."""
     ralph_dir = temp_project / RALPH_DIR
