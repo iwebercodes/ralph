@@ -22,6 +22,7 @@ import shutil
 import subprocess  # nosec B404 - controlled internal usage
 import time
 from abc import ABC, abstractmethod
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -236,14 +237,14 @@ class _WindowsMechanism(_SleepPreventionMechanism):
     ES_DISPLAY_REQUIRED = 0x00000002
 
     def __init__(self) -> None:
-        self._kernel32 = None
+        self._kernel32: Any = None
         self._was_active = False
 
     def acquire(self) -> bool:
         try:
             import ctypes
 
-            kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+            kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined, unused-ignore]
             result = kernel32.SetThreadExecutionState(
                 self.ES_CONTINUOUS | self.ES_SYSTEM_REQUIRED | self.ES_DISPLAY_REQUIRED
             )
@@ -255,7 +256,7 @@ class _WindowsMechanism(_SleepPreventionMechanism):
             else:
                 logger.warning(
                     "Windows: SetThreadExecutionState returned 0 (error: %s)",
-                    ctypes.get_last_error(),  # type: ignore[attr-defined]
+                    ctypes.get_last_error(),  # type: ignore[attr-defined, unused-ignore]
                 )
                 return False
         except (AttributeError, OSError) as e:

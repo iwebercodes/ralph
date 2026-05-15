@@ -22,6 +22,34 @@ IS_WINDOWS = sys.platform == "win32"
 IS_LINUX = sys.platform.startswith("linux")
 
 
+def _systemd_logind_reachable() -> bool:
+    """Whether systemd-inhibit can actually acquire an inhibitor lock.
+
+    GitHub Actions runners ship the systemd-inhibit binary and even let
+    `--list` exit 0, but a real Inhibit() call against logind fails with
+    exit 1. The only reliable probe is to attempt a tiny inhibit and see
+    whether it succeeds.
+    """
+    if shutil.which("systemd-inhibit") is None:
+        return False
+    try:
+        result = subprocess.run(
+            [
+                "systemd-inhibit",
+                "--what=sleep",
+                "--who=ralph-test",
+                "--why=probe",
+                "--mode=block",
+                "true",
+            ],
+            capture_output=True,
+            timeout=5,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+    return result.returncode == 0
+
+
 class TestNoSleepBasic:
     """Tests for NoSleep class basic behavior."""
 
@@ -266,7 +294,8 @@ class TestLinuxMechanismSmoke:
     """
 
     @pytest.mark.skipif(
-        shutil.which("systemd-inhibit") is None, reason="systemd-inhibit not on PATH"
+        not _systemd_logind_reachable(),
+        reason="systemd-logind not reachable (e.g. GitHub Actions runner)",
     )
     def test_systemd_inhibit_actually_acquires_inhibitor(self) -> None:
         """systemd-inhibit actually holds an inhibitor visible to systemd-logind."""
@@ -303,7 +332,8 @@ class TestLinuxMechanismSmoke:
         assert list_out2.returncode == 0
 
     @pytest.mark.skipif(
-        shutil.which("systemd-inhibit") is None, reason="systemd-inhibit not on PATH"
+        not _systemd_logind_reachable(),
+        reason="systemd-logind not reachable (e.g. GitHub Actions runner)",
     )
     def test_nosleep_is_active_on_real_linux(self) -> None:
         """NoSleep() reports is_active=True on a real systemd Linux system."""

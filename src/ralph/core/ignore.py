@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path, PurePosixPath
+from typing import Any
 
 import pathspec
 
@@ -39,12 +40,12 @@ def load_ignore_patterns(root: Path | None = None) -> list[str]:
     return patterns
 
 
-def create_spec(patterns: list[str]) -> pathspec.PathSpec:
+def create_spec(patterns: list[str]) -> pathspec.PathSpec[Any]:
     """Create a pathspec from patterns."""
     return pathspec.PathSpec.from_lines("gitignore", patterns)
 
 
-def should_ignore(path: str | Path, spec: pathspec.PathSpec) -> bool:
+def should_ignore(path: str | Path, spec: pathspec.PathSpec[Any]) -> bool:
     """Check if a path should be ignored."""
     # Normalize Windows separators so gitignore-style matching is stable cross-platform.
     path_str = PurePosixPath(str(path).replace("\\", "/")).as_posix()

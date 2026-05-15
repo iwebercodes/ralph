@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+from typing import Any
 
 import pathspec
 
@@ -23,7 +24,7 @@ def hash_file(path: Path) -> str:
 
 
 def take_snapshot(
-    root: Path | None = None, spec: pathspec.PathSpec | None = None
+    root: Path | None = None, spec: pathspec.PathSpec[Any] | None = None
 ) -> dict[str, str]:
     """Take a snapshot of all tracked files.
 
