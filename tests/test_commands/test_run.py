@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from contextlib import nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import patch
@@ -783,6 +784,10 @@ def test_run_multiple_rotations_show_independent_durations(project_with_prompt: 
         patch("ralph.commands.run.ClaudeAgent", return_value=AvailableClaude()),
         patch("ralph.commands.run.CodexAgent", return_value=UnavailableCodex()),
         patch("ralph.commands.run.run_loop", side_effect=fake_run_loop),
+        # Replace NoSleep with a no-op context manager so its real subprocess
+        # and warning-logger calls (which would also consume mocked time.time
+        # values) don't break the fixed-sequence time mock below.
+        patch("ralph.commands.run.NoSleep", lambda **kw: nullcontext()),
         patch(
             "ralph.commands.run.time.time",
             side_effect=[0.0, 10.0, 55.0, 60.0, 193.0, 200.0],
@@ -1057,3 +1062,85 @@ def test_run_agents_pi_with_other_available(
 
     # Only Pi should be in the pool (Claude and Codex filtered out by --agents pi)
     assert captured_agents == ["Pi"]
+
+
+# =============================================================================
+# Multi-Spec Mode - Additional Tests for Remaining Criteria
+# =============================================================================
+
+
+def test_run_no_specs_error_message(
+    temp_project: Path,
+) -> None:
+    """Running without any spec files shows helpful error message."""
+    from ralph.core.state import write_iteration, write_status
+
+    # Initialize Ralph but don't create any spec files
+    ralph_dir = temp_project / ".ralph"
+    ralph_dir.mkdir()
+    (ralph_dir / "handoffs").mkdir()
+    (ralph_dir / "history").mkdir()
+    write_status(Status.IDLE, temp_project)
+    write_iteration(0, temp_project)
+
+    with (
+        patch("ralph.commands.run.ClaudeAgent") as mock_claude_cls,
+        patch("ralph.commands.run.CodexAgent") as mock_codex_cls,
+        patch("ralph.commands.run.PiAgent") as mock_pi_cls,
+    ):
+        mock_claude_cls.return_value = _UnavailableClaude()
+        mock_codex_cls.return_value = _UnavailableCodex()
+        mock_pi_cls.return_value = _UnavailablePi()
+
+        result = runner.invoke(app, ["run"])
+
+    assert result.exit_code == 1
+    assert "No spec files found" in result.output
+    assert "PROMPT.md" in result.output
+    assert ".ralph/specs" in result.output
+    assert "specs/" in result.output
+
+
+def test_run_no_specs_match_filter(
+    project_with_prompt: Path,
+) -> None:
+    """Running with --filter that matches nothing shows error."""
+    with (
+        patch("ralph.commands.run.ClaudeAgent") as mock_claude_cls,
+        patch("ralph.commands.run.CodexAgent") as mock_codex_cls,
+        patch("ralph.commands.run.PiAgent") as mock_pi_cls,
+    ):
+        mock_claude_cls.return_value = _UnavailableClaude()
+        mock_codex_cls.return_value = _UnavailableCodex()
+        mock_pi_cls.return_value = _UnavailablePi()
+
+        result = runner.invoke(app, ["run", "--filter", "nonexistent"])
+
+    assert result.exit_code == 1
+    assert "No specs match filter" in result.output
+
+
+class _UnavailablePi:
+    """Mock Pi agent that is unavailable."""
+
+    name = "Pi"
+    is_available = lambda self: False  # noqa: E731
+
+
+def test_run_no_agents_error_message(
+    project_with_prompt: Path,
+) -> None:
+    """Running with no available agents shows helpful message."""
+    with (
+        patch("ralph.commands.run.ClaudeAgent") as mock_claude_cls,
+        patch("ralph.commands.run.CodexAgent") as mock_codex_cls,
+        patch("ralph.commands.run.PiAgent") as mock_pi_cls,
+    ):
+        mock_claude_cls.return_value = _UnavailableClaude()
+        mock_codex_cls.return_value = _UnavailableCodex()
+        mock_pi_cls.return_value = _UnavailablePi()
+
+        result = runner.invoke(app, ["run"])
+
+    assert result.exit_code == 1
+    assert "No AI agents available" in result.output

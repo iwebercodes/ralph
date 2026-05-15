@@ -90,7 +90,7 @@ def history(
         entries: list[tuple[int, str | None, str | None, int, bool]] = []
         for log_file in log_files:
             rot_num = int(log_file.stem)
-            content = log_file.read_text()
+            content = log_file.read_text(encoding="utf-8")
             timestamp, status, files_changed = parse_log_summary(content)
 
             # Check if this is the final complete entry
@@ -98,7 +98,7 @@ def history(
             if status == "DONE" and rot_num == len(log_files):
                 done_count = 0
                 for lf in reversed(log_files):
-                    lf_content = lf.read_text()
+                    lf_content = lf.read_text(encoding="utf-8")
                     _, lf_status, lf_changes = parse_log_summary(lf_content)
                     if lf_status == "DONE" and lf_changes == 0:
                         done_count += 1
@@ -125,7 +125,7 @@ def history(
         log_file = log_files[-1]
         rotation = int(log_file.stem)
 
-    content = log_file.read_text()
+    content = log_file.read_text(encoding="utf-8")
 
     if tail is not None:
         lines = content.splitlines()

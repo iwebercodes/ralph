@@ -30,7 +30,7 @@ def load_ignore_patterns(root: Path | None = None) -> list[str]:
 
     ralphignore = root / ".ralphignore"
     if ralphignore.exists():
-        content = ralphignore.read_text()
+        content = ralphignore.read_text(encoding="utf-8")
         for line in content.splitlines():
             line = line.strip()
             if line and not line.startswith("#"):

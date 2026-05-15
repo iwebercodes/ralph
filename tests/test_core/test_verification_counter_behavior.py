@@ -208,3 +208,249 @@ def test_handle_status_with_empty_specs_list() -> None:
     assert action == "exit"
     assert exit_code == 2
     assert done_count == 0
+
+
+# ============================================================================
+# Scenario tests from spec examples
+# ============================================================================
+
+
+def test_scenario_1_implementation_and_verification() -> None:
+    """Example 1: Agent implements feature, then verifies twice without changes.
+
+    Rotation 1: Agent implements feature, returns DONE → 1/3
+    Rotation 2: Agent reviews code, returns DONE (no changes) → 2/3
+    Rotation 3: Agent reviews again, returns DONE (no changes) → 3/3 ✓
+    """
+    state = _state([0], [None], current_index=0)
+
+    # Rotation 1: DONE with file changes → 1/3
+    _, _, state, done_count = handle_status(state, 0, Status.DONE, ["feature.py"], "hash-1")
+    assert done_count == 1
+    assert state.specs[0].done_count == 1
+
+    # Rotation 2: DONE without changes → 2/3
+    _, _, state, done_count = handle_status(state, 0, Status.DONE, [], "hash-2")
+    assert done_count == 2
+    assert state.specs[0].done_count == 2
+
+    # Rotation 3: DONE without changes → 3/3
+    _, exit_code, state, done_count = handle_status(state, 0, Status.DONE, [], "hash-3")
+    assert done_count == 3
+    assert state.specs[0].done_count == 3
+    assert exit_code == 0  # All specs complete
+
+
+def test_scenario_2_rotation_without_completion() -> None:
+    """Example 2: Agent works on feature, returns ROTATE, then continues.
+
+    Rotation 1: Agent works on feature, returns ROTATE → 0/3 (unchanged)
+    Rotation 2: Agent continues work, returns DONE → 1/3
+    Rotation 3: Agent reviews, returns DONE (no changes) → 2/3
+    """
+    state = _state([0], [None], current_index=0)
+
+    # Rotation 1: ROTATE without changes → 0/3 (unchanged)
+    _, _, state, done_count = handle_status(state, 0, Status.ROTATE, [], "hash-1")
+    assert done_count == 0
+    assert state.specs[0].done_count == 0
+
+    # Rotation 2: DONE with file changes → 1/3
+    _, _, state, done_count = handle_status(state, 0, Status.DONE, ["feature.py"], "hash-2")
+    assert done_count == 1
+    assert state.specs[0].done_count == 1
+
+    # Rotation 3: DONE without changes → 2/3
+    _, _, state, done_count = handle_status(state, 0, Status.DONE, [], "hash-3")
+    assert done_count == 2
+    assert state.specs[0].done_count == 2
+
+
+def test_scenario_3_found_issue_during_verification() -> None:
+    """Example 3: Agent implements, then finds and fixes a bug during review.
+
+    Rotation 1: Agent implements, returns DONE → 1/3
+    Rotation 2: Agent reviews, finds bug, fixes it, returns DONE → 1/3 (reset due to changes)
+    Rotation 3: Agent reviews, returns DONE (no changes) → 2/3
+    """
+    state = _state([0], [None], current_index=0)
+
+    # Rotation 1: DONE with file changes → 1/3
+    _, _, state, done_count = handle_status(state, 0, Status.DONE, ["feature.py"], "hash-1")
+    assert done_count == 1
+    assert state.specs[0].done_count == 1
+
+    # Rotation 2: DONE with file changes (bug fix) → 1/3 (reset)
+    _, _, state, done_count = handle_status(state, 0, Status.DONE, ["feature.py"], "hash-2")
+    assert done_count == 1
+    assert state.specs[0].done_count == 1
+
+    # Rotation 3: DONE without changes → 2/3
+    _, _, state, done_count = handle_status(state, 0, Status.DONE, [], "hash-3")
+    assert done_count == 2
+    assert state.specs[0].done_count == 2
+
+
+def test_scenario_4_context_exhaustion_during_verification() -> None:
+    """Example 4: Context runs out during verification, different agent finishes it.
+
+    Rotation 1: Agent implements, returns DONE → 1/3
+    Rotation 2: Agent reviews, returns DONE (no changes) → 2/3
+    Rotation 3: Agent reviews, returns ROTATE (no changes) → 2/3 (unchanged)
+    Rotation 4: Different agent reviews, returns DONE (no changes) → 3/3 ✓
+    """
+    state = _state([0], [None], current_index=0)
+
+    # Rotation 1: DONE with file changes → 1/3
+    _, _, state, done_count = handle_status(state, 0, Status.DONE, ["feature.py"], "hash-1")
+    assert done_count == 1
+    assert state.specs[0].done_count == 1
+
+    # Rotation 2: DONE without changes → 2/3
+    _, _, state, done_count = handle_status(state, 0, Status.DONE, [], "hash-2")
+    assert done_count == 2
+    assert state.specs[0].done_count == 2
+
+    # Rotation 3: ROTATE without changes → 2/3 (unchanged)
+    _, _, state, done_count = handle_status(state, 0, Status.ROTATE, [], "hash-3")
+    assert done_count == 2
+    assert state.specs[0].done_count == 2
+
+    # Rotation 4: DONE without changes → 3/3 ✓
+    _, exit_code, state, done_count = handle_status(state, 0, Status.DONE, [], "hash-4")
+    assert done_count == 3
+    assert state.specs[0].done_count == 3
+    assert exit_code == 0
+
+
+def test_scenario_5_selective_propagation_in_multi_spec_mode() -> None:
+    """Example 5: Multi-spec mode with selective propagation.
+
+    Spec A: At 3/3 (fully verified)
+    Spec B: At 2/3 (in verification)
+    Spec C: At 0/3 (new work)
+    Active Spec D: Works on implementation, changes files, returns DONE
+    Result: Spec D -> 1/3, Spec A -> 2/3, Spec B -> 2/3, Spec C -> 0/3
+    """
+    state = _state(
+        [3, 2, 0, 0],
+        [Status.DONE.value, Status.DONE.value, None, None],
+        current_index=3,
+    )
+
+    # Active spec D: DONE with file changes → 1/3
+    # Spec A (3/3) should downgrade to 2/3
+    # Spec B (2/3) remains unchanged
+    # Spec C (0/3) remains unchanged
+    _, _, state, done_count = handle_status(state, 3, Status.DONE, ["new-feature.py"], "hash-d")
+    assert done_count == 1
+    assert state.specs[0].done_count == 2  # A: 3/3 -> 2/3 downgrade
+    assert state.specs[1].done_count == 2  # B: unchanged (not 3/3)
+    assert state.specs[2].done_count == 0  # C: unchanged
+    assert state.specs[3].done_count == 1  # D: DONE + changes -> 1
+
+
+def test_multiple_3_of_three_specs_downgrade_on_change() -> None:
+    """When one spec changes files, ALL other 3/3 specs downgrade to 2/3."""
+    state = _state(
+        [3, 3, 3, 0],
+        [Status.DONE.value] * 3 + [None],
+        current_index=3,
+    )
+
+    # Active spec D: DONE with file changes → 1/3
+    # All three other 3/3 specs should downgrade to 2/3
+    _, _, state, done_count = handle_status(state, 3, Status.DONE, ["feature.py"], "hash-d")
+    assert done_count == 1
+    assert state.specs[0].done_count == 2  # All three downgrade
+    assert state.specs[1].done_count == 2
+    assert state.specs[2].done_count == 2
+    assert state.specs[3].done_count == 1
+
+
+def test_non_done_with_changes_downgrades_other_3_of_three() -> None:
+    """Non-DONE with changes resets current to 0 and downgrades other 3/3 specs."""
+    state = _state(
+        [3, 2],
+        [Status.DONE.value, Status.CONTINUE.value],
+        current_index=1,
+    )
+
+    # Spec B: CONTINUE with changes → 0/3
+    # Spec A (3/3) should downgrade to 2/3
+    _, _, state, done_count = handle_status(state, 1, Status.CONTINUE, ["feature.py"], "hash-b")
+    assert done_count == 0
+    assert state.specs[0].done_count == 2  # A: 3/3 -> 2/3 downgrade
+    assert state.specs[1].done_count == 0  # B: CONTINUE + changes -> 0
+
+
+def test_counter_starts_at_zero_for_new_specs() -> None:
+    """Counter starts at 0/3 for brand new specs."""
+    state = _state([0], [None], current_index=0)
+    assert state.specs[0].done_count == 0
+
+
+def test_counter_stays_at_three_when_already_complete() -> None:
+    """Counter stays at 3/3 when already fully verified (no more work)."""
+    state = _state([3], [Status.DONE.value], current_index=0)
+
+    # Even with DONE and no changes, counter stays at 3
+    _, _, updated, done_count = handle_status(state, 0, Status.DONE, [], "hash")
+    assert done_count == 3
+    assert updated.specs[0].done_count == 3
+
+
+def test_multi_spec_propagation_preserves_in_progress_specs() -> None:
+    """Multi-spec propagation preserves in-progress specs at 1/3 and 2/3."""
+    state = _state(
+        [3, 1, 2],
+        [Status.DONE.value, Status.CONTINUE.value, Status.DONE.value],
+        current_index=0,
+    )
+
+    # Spec A (current): DONE without changes → still 3/3 (no propagation for current)
+    _, _, state, done_count = handle_status(state, 0, Status.DONE, [], "hash-a")
+    assert done_count == 3
+    assert state.specs[0].done_count == 3  # Current spec unchanged
+    assert state.specs[1].done_count == 1  # B: preserved at 1/3
+    assert state.specs[2].done_count == 2  # C: preserved at 2/3
+
+
+def test_propagation_on_active_spec_with_no_changes() -> None:
+    """When active spec has DONE without changes, no propagation occurs."""
+    state = _state(
+        [1, 3],
+        [Status.DONE.value, Status.DONE.value],
+        current_index=0,
+    )
+
+    # Spec A (current): DONE without changes → 2/3
+    # No file changes, so no propagation to other specs
+    _, _, state, done_count = handle_status(state, 0, Status.DONE, [], "hash-a")
+    assert done_count == 2
+    assert state.specs[0].done_count == 2  # A: increments
+    assert state.specs[1].done_count == 3  # B: unchanged (no file changes)
+
+
+def test_done_with_changes_only_downgrades_other_specs_not_current() -> None:
+    """DONE with changes resets current to 1, not to 0."""
+    state = _state([2], [Status.DONE.value], current_index=0)
+
+    # DONE + changes should reset to 1/3, not 0/3
+    _, _, state, done_count = handle_status(state, 0, Status.DONE, ["feature.py"], "hash")
+    assert done_count == 1
+    assert state.specs[0].done_count == 1
+
+
+def test_non_done_with_no_changes_is_completely_stable() -> None:
+    """Non-DONE without changes is a no-op - counter stays exactly the same."""
+    for status in (Status.CONTINUE, Status.ROTATE):
+        state = _state([1], [None], current_index=0)
+        _, _, updated, done_count = handle_status(state, 0, status, [], "hash")
+        assert done_count == 1
+        assert updated.specs[0].done_count == 1
+
+    state = _state([2], [None], current_index=0)
+    _, _, updated, done_count = handle_status(state, 0, Status.ROTATE, [], "hash")
+    assert done_count == 2
+    assert updated.specs[0].done_count == 2

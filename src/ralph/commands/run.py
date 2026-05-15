@@ -12,6 +12,7 @@ import typer
 from ralph.commands.global_flags import about_callback, version_callback
 from ralph.core.agent import Agent, ClaudeAgent, CodexAgent, PiAgent
 from ralph.core.loop import IterationResult, run_loop
+from ralph.core.no_sleep import NoSleep
 from ralph.core.pool import AgentPool
 from ralph.core.prompt import assemble_prompt
 from ralph.core.run_state import delete_run_state, is_pid_alive, read_run_state
@@ -132,39 +133,66 @@ See docs: docs/writing-prompts.md"""
             raise typer.Exit(1)
         delete_run_state(root)
 
-    # Handle debug-prompt mode
+    # Handle debug-prompt mode (no sleep prevention, no agents invoked)
     if debug_prompt:
-        # Use the first spec (or only spec if filtered)
-        spec = specs[0]
-        spec_path = spec.rel_posix
-        spec_goal = read_spec_content(spec.path) or ""
+        with NoSleep(debug_prompt=True):
+            spec = specs[0]
+            spec_path = spec.rel_posix
+            spec_goal = read_spec_content(spec.path) or ""
 
-        # Read current state
-        state = read_state(root)
-        iteration = state.iteration + 1
-        done_count = state.done_count
+            # Read current state
+            state = read_state(root)
+            iteration = state.iteration + 1
+            done_count = state.done_count
 
-        # Read handoff and guardrails
-        handoff = read_handoff(root, spec_path)
-        guardrails = read_guardrails(root)
-        handoff_path = get_handoff_path(spec_path, root)
+            # Read handoff and guardrails
+            handoff = read_handoff(root, spec_path)
+            guardrails = read_guardrails(root)
+            handoff_path = get_handoff_path(spec_path, root)
 
-        # Assemble the prompt
-        prompt = assemble_prompt(
-            iteration=iteration,
-            max_iter=max_iterations,
-            done_count=done_count,
-            goal=spec_goal,
-            handoff=handoff,
-            guardrails=guardrails,
-            spec_path=spec_path,
-            handoff_path=handoff_path.as_posix(),
-        )
+            # Assemble the prompt
+            prompt = assemble_prompt(
+                iteration=iteration,
+                max_iter=max_iterations,
+                done_count=done_count,
+                goal=spec_goal,
+                handoff=handoff,
+                guardrails=guardrails,
+                spec_path=spec_path,
+                handoff_path=handoff_path.as_posix(),
+            )
 
-        # Output the prompt to stdout and exit
-        console.print(prompt)
+            # Output the prompt to stdout and exit
+            console.print(prompt)
         raise typer.Exit(0)
 
+    # Sleep prevention is active during the main loop
+    with NoSleep():
+        _run_main_loop(
+            root=root,
+            console=console,
+            max_iterations=max_iterations,
+            agents=agents,
+            timeout=timeout,
+            no_timeout=no_timeout,
+            filter_spec=filter_spec,
+        )
+
+
+def _run_main_loop(
+    root: Path,
+    console: Console,
+    max_iterations: int,
+    agents: str | None,
+    timeout: int | None,
+    no_timeout: bool,
+    filter_spec: str | None,
+) -> None:
+    """Inner loop body wrapped by NoSleep context manager.
+
+    This function is called inside `with NoSleep():` so that sleep prevention
+    is active from before the loop starts until after it ends (all exit paths).
+    """
     # Build agent pool from available agents
     all_agents: list[Agent] = [ClaudeAgent(), CodexAgent(), PiAgent()]
 

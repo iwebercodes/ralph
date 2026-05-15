@@ -1240,3 +1240,334 @@ def test_new_spec_interrupts_current_focus(project_with_prompt: Path) -> None:
 
     assert result.exit_code == 3
     assert observed == ["PROMPT.md", "specs/a-new.spec.md"]
+
+
+# =============================================================================
+# Additional Multi-Spec Mode Criteria Tests
+# =============================================================================
+
+
+class FocusedExecutionAgent(RecordingAgent):
+    """Agent that can be configured to return DONE at different iterations."""
+
+    def __init__(self, root: Path, done_at_iteration: int = 3):
+        super().__init__(root)
+        self._done_at_iteration = done_at_iteration
+        self._invocations = 0
+
+    def invoke(
+        self,
+        prompt: str,
+        timeout: int | None = 1800,
+        output_file: Path | None = None,
+        crash_patterns: list[str] | None = None,
+    ) -> AgentResult:
+        self._invocations += 1
+        if self._invocations >= self._done_at_iteration:
+            (self._root / ".ralph" / "status").write_text(Status.DONE.value)
+        else:
+            (self._root / ".ralph" / "status").write_text(Status.CONTINUE.value)
+        return AgentResult("ok", 0, None)
+
+
+def test_focused_execution_switches_after_done_no_changes(
+    project_with_prompt: Path,
+) -> None:
+    """When current spec DONE with no changes, switch to next spec that needs work."""
+    (project_with_prompt / "specs").mkdir(exist_ok=True)
+    (project_with_prompt / "specs" / "a.spec.md").write_text("# Goal\nA")
+
+    agent = FocusedExecutionAgent(project_with_prompt, done_at_iteration=2)
+    pool = AgentPool([agent])
+    observed: list[str] = []
+
+    def on_iteration_start(
+        iteration: int, max_iter: int, done_count: int, agent_name: str, spec_path: str
+    ) -> None:
+        observed.append(spec_path)
+
+    result = run_loop(
+        max_iter=8,
+        root=project_with_prompt,
+        agent_pool=pool,
+        on_iteration_start=on_iteration_start,
+    )
+
+    # With focused execution, RecordingAgent returns DONE at invocations >= 2.
+    # PROMPT.md: iteration 1 (CONTINUE), iteration 2 (DONE, counter=1),
+    # iteration 3 (DONE, counter=2), iteration 4 (DONE, counter=3) -> completes
+    # Then switches to a.spec.md for iterations 5-7 (similar pattern)
+    # Both specs reach 3/3, so exit code is 0 (Goal achieved)
+    assert result.exit_code == 0
+    # First spec worked on is PROMPT.md
+    assert observed[0] == "PROMPT.md"
+    # After PROMPT.md completes (3 DONE without changes), switch to a.spec.md
+    first_a_index = next(i for i, s in enumerate(observed) if s == "specs/a.spec.md")
+    assert first_a_index > 0  # some iterations on PROMPT.md before switching
+    # After a.spec.md completes, loop ends (all specs 3/3)
+    assert all(s == "specs/a.spec.md" for s in observed[first_a_index:])
+
+
+def test_focused_execution_with_done_and_changes(
+    project_with_prompt: Path,
+) -> None:
+    """DONE with file changes resets counter to 1 and stays on same spec."""
+    (project_with_prompt / "specs").mkdir(exist_ok=True)
+    (project_with_prompt / "specs" / "a.spec.md").write_text("# Goal\nA")
+
+    class ChangesAgent(RecordingAgent):
+        _invocations: int = 0
+
+        def __init__(self, root: Path, make_changes: bool = True):
+            super().__init__(root)
+            self._make_changes = make_changes
+
+        def invoke(
+            self,
+            prompt: str,
+            timeout: int | None = 1800,
+            output_file: Path | None = None,
+            crash_patterns: list[str] | None = None,
+        ) -> AgentResult:
+            ChangesAgent._invocations += 1
+            (self._root / ".ralph" / "status").write_text(Status.DONE.value)
+            if self._make_changes:
+                (self._root / "test_output.txt").write_text(
+                    f"changed at {ChangesAgent._invocations}"
+                )
+            return AgentResult("ok", 0, None)
+
+    agent = ChangesAgent(project_with_prompt, make_changes=True)
+    pool = AgentPool([agent])
+    observed: list[str] = []
+
+    def on_iteration_start(
+        iteration: int, max_iter: int, done_count: int, agent_name: str, spec_path: str
+    ) -> None:
+        observed.append(spec_path)
+
+    result = run_loop(
+        max_iter=5,
+        root=project_with_prompt,
+        agent_pool=pool,
+        on_iteration_start=on_iteration_start,
+    )
+
+    assert result.exit_code == 3
+    # With changes on DONE, counter resets to 1 each time.
+    # Since it always makes changes, counter never reaches 3, max iterations hit.
+    # All iterations should be on PROMPT.md (focused execution stays on same spec).
+    assert observed[0] == "PROMPT.md"
+    assert all(s == "PROMPT.md" for s in observed)
+
+
+def test_completed_spec_skipped_when_other_specs_need_work(
+    project_with_prompt: Path,
+) -> None:
+    """Once a spec reaches 3/3, it's skipped in favor of specs that need work."""
+    from ralph.core.specs import spec_content_hash
+    from ralph.core.state import write_multi_state
+
+    (project_with_prompt / "specs").mkdir(exist_ok=True)
+    (project_with_prompt / "specs" / "a.spec.md").write_text("# Goal\nA")
+
+    hash_p = spec_content_hash(project_with_prompt / "PROMPT.md")
+    hash_a = spec_content_hash(project_with_prompt / "specs" / "a.spec.md")
+
+    # PROMPT.md is already 3/3 (completed)
+    initial_state = MultiSpecState(
+        version=1,
+        iteration=0,
+        status=Status.IDLE,
+        current_index=0,
+        specs=[
+            SpecProgress(path="PROMPT.md", done_count=3, last_status="DONE", last_hash=hash_p),
+            SpecProgress(path="specs/a.spec.md", done_count=0, last_status=None, last_hash=hash_a),
+        ],
+    )
+    write_multi_state(initial_state, project_with_prompt)
+
+    agent = FocusedExecutionAgent(project_with_prompt, done_at_iteration=2)
+    pool = AgentPool([agent])
+    observed: list[str] = []
+
+    def on_iteration_start(
+        iteration: int, max_iter: int, done_count: int, agent_name: str, spec_path: str
+    ) -> None:
+        observed.append(spec_path)
+
+    result = run_loop(
+        max_iter=8,
+        root=project_with_prompt,
+        agent_pool=pool,
+        on_iteration_start=on_iteration_start,
+    )
+
+    # Both specs complete: PROMPT.md already 3/3, a.spec.md gets 3 DONE signals.
+    assert result.exit_code == 0
+    # Should start with a.spec.md (not completed) instead of PROMPT.md (3/3)
+    assert observed[0] == "specs/a.spec.md"
+
+
+def test_spec_discovery_from_ralph_specs_only(temp_project: Path) -> None:
+    """Discovery works when only .ralph/specs/ exists, no specs/ directory."""
+    (temp_project / ".ralph").mkdir()
+    (temp_project / ".ralph" / "specs").mkdir()
+    (temp_project / ".ralph" / "specs" / "api.spec.md").write_text("API spec")
+
+    specs = discover_specs(temp_project)
+    assert len(specs) == 1
+    assert specs[0].rel_posix == ".ralph/specs/api.spec.md"
+
+
+def test_spec_discovery_from_both_locations(temp_project: Path) -> None:
+    """Discovery finds specs from both .ralph/specs/ and specs/."""
+    (temp_project / ".ralph").mkdir()
+    (temp_project / ".ralph" / "specs").mkdir()
+    (temp_project / "specs").mkdir()
+
+    (temp_project / ".ralph" / "specs" / "b.spec.md").write_text("B")
+    (temp_project / "specs" / "a.spec.md").write_text("A")
+
+    specs = discover_specs(temp_project)
+    assert len(specs) == 2
+    # Alphabetical by rel_posix: .ralph/specs/b.spec.md < specs/a.spec.md
+    assert specs[0].rel_posix == ".ralph/specs/b.spec.md"
+    assert specs[1].rel_posix == "specs/a.spec.md"
+
+
+def test_spec_discovery_nested_subdirectories(temp_project: Path) -> None:
+    """Discovery finds specs in nested subdirectories."""
+    (temp_project / ".ralph").mkdir()
+    (temp_project / ".ralph" / "specs").mkdir()
+    (temp_project / ".ralph" / "specs" / "v1").mkdir()
+    (temp_project / ".ralph" / "specs" / "v1" / "deep").mkdir()
+
+    (temp_project / ".ralph" / "specs" / "top.spec.md").write_text("Top")
+    (temp_project / ".ralph" / "specs" / "v1" / "mid.spec.md").write_text("Mid")
+    (temp_project / ".ralph" / "specs" / "v1" / "deep" / "bottom.spec.md").write_text("Bottom")
+
+    specs = discover_specs(temp_project)
+    assert len(specs) == 3
+    rel_paths = [spec.rel_posix for spec in specs]
+    assert ".ralph/specs/top.spec.md" in rel_paths
+    assert ".ralph/specs/v1/mid.spec.md" in rel_paths
+    assert ".ralph/specs/v1/deep/bottom.spec.md" in rel_paths
+
+
+def test_ui_always_shows_spec_row(temp_project: Path) -> None:
+    """UI always shows Spec row, even with single PROMPT.md."""
+    from ralph.output.console import Console
+
+    console = Console(no_color=True)
+
+    # Single spec (PROMPT.md) - should still show Spec row
+    output_lines = []
+
+    def capture_print(msg=""):
+        if msg:
+            output_lines.append(msg)
+
+    console._print = capture_print
+
+    console.working(0, "Codex")
+    console.iteration_info(7, 20, 0, "PROMPT.md")
+    console.close_iteration()
+
+    assert any("Spec:" in line for line in output_lines)
+
+
+def test_ui_always_shows_spec_row_for_subspec(temp_project: Path) -> None:
+    """UI always shows Spec row for subdirectory specs."""
+    from ralph.output.console import Console
+
+    console = Console(no_color=True)
+    output_lines = []
+
+    def capture_print(msg=""):
+        if msg:
+            output_lines.append(msg)
+
+    console._print = capture_print
+
+    console.working(2, "Codex")
+    console.iteration_info(15, 20, 2, "specs/api.spec.md")
+    console.close_iteration()
+
+    assert any("Spec:" in line for line in output_lines)
+    assert any("specs/api.spec.md" in line for line in output_lines)
+
+
+def test_reset_preserves_spec_states_with_multiple_specs(initialized_project: Path) -> None:
+    """Reset preserves all per-spec states when multiple specs exist."""
+    from ralph.core.state import read_multi_state, write_multi_state
+
+    initial_state = MultiSpecState(
+        version=1,
+        iteration=10,
+        status=Status.CONTINUE,
+        current_index=1,
+        specs=[
+            SpecProgress(
+                path="PROMPT.md",
+                done_count=3,
+                last_status="DONE",
+                last_hash="h-p",
+                modified_files=True,
+            ),
+            SpecProgress(
+                path="specs/a.spec.md",
+                done_count=1,
+                last_status="CONTINUE",
+                last_hash="h-a",
+                modified_files=False,
+            ),
+            SpecProgress(path="specs/b.spec.md", done_count=0, last_status=None, last_hash=None),
+        ],
+    )
+    write_multi_state(initial_state, initialized_project)
+
+    import contextlib
+
+    import typer
+
+    from ralph.commands.reset import reset as reset_command
+
+    with contextlib.suppress(typer.Exit):
+        reset_command()
+
+    state = read_multi_state(initialized_project)
+    assert state is not None
+    assert state.iteration == 0
+    assert len(state.specs) == 3
+
+    # All spec states preserved
+    assert state.specs[0].last_status == "DONE"
+    assert state.specs[0].done_count == 0  # reset
+    assert state.specs[1].last_status == "CONTINUE"
+    assert state.specs[1].done_count == 0  # reset
+    assert state.specs[2].last_status is None
+    assert state.specs[2].done_count == 0  # new spec
+
+
+def test_handle_status_preserves_other_counters_on_non_done_with_changes() -> None:
+    """Non-DONE with changes only resets current and downgrades 3/3 others."""
+    from ralph.core.loop import handle_status
+
+    state = MultiSpecState(
+        version=1,
+        iteration=1,
+        status=Status.CONTINUE,
+        current_index=0,
+        specs=[
+            SpecProgress(path="a.spec.md", done_count=1),  # current
+            SpecProgress(path="b.spec.md", done_count=3),  # should downgrade to 2
+            SpecProgress(path="c.spec.md", done_count=2),  # unchanged
+        ],
+    )
+
+    _, _, updated, _ = handle_status(state, 0, Status.ROTATE, ["file.py"], "hash-a")
+
+    assert updated.specs[0].done_count == 0  # current ROTATE+changes -> 0
+    assert updated.specs[1].done_count == 2  # 3/3 -> 2/3 downgrade
+    assert updated.specs[2].done_count == 2  # unchanged (not 3/3)

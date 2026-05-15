@@ -82,7 +82,7 @@ def init(
     prompt_path = root / "PROMPT.md"
     created_prompt = False
     if not prompt_path.exists():
-        prompt_path.write_text(PROMPT_TEMPLATE)
+        prompt_path.write_text(PROMPT_TEMPLATE, encoding="utf-8")
         created_prompt = True
 
     if force:
