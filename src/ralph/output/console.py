@@ -113,6 +113,12 @@ class Console:
             title = f"{agent_name} reviewing..." if done_count > 0 else f"{agent_name} working..."
             self._print(self._box_top(title))
 
+    def system_working(self, agent_name: str, period: int) -> None:
+        """Show that an agent is running a periodic system task — opens the box."""
+        if self._is_tty:
+            title = f"{agent_name} running system task (every {period})"
+            self._print(self._box_top(title, color_fn=self._colors.magenta))
+
     def iteration_info(
         self, iteration: int, max_iter: int, done_count: int, spec_path: str | None = None
     ) -> None:
@@ -129,6 +135,55 @@ class Console:
                 self._print(f"[ralph] Spec: {spec_path}")
             mode = " [REVIEW]" if done_count > 0 else ""
             self._print(f"[ralph] ─── Rotation {iteration}/{max_iter}{mode} ───")
+
+    def system_iteration_info(
+        self, iteration: int, max_iter: int, spec_path: str, period: int
+    ) -> None:
+        """Print the [SYSTEM] iteration banner inside the box."""
+        system_tag = self._colors.magenta(" [SYSTEM]")
+        magenta = self._colors.magenta
+        if self._is_tty:
+            iter_str = f"{self._colors.cyan(str(iteration))}/{max_iter}{system_tag}"
+            self._print(self._box_line(f"Spec:         {spec_path}", color_fn=magenta))
+            self._print(self._box_line(f"Iteration:    {iter_str}", color_fn=magenta))
+            self._print(
+                self._box_line(f"Schedule:     every {period} iterations", color_fn=magenta)
+            )
+        else:
+            self._print(f"[ralph] Spec: {spec_path}")
+            self._print(f"[ralph] ─── Rotation {iteration}/{max_iter} [SYSTEM] ───")
+
+    def system_rotation_complete(self, files_changed: list[str], duration: float | None) -> None:
+        """Close the [SYSTEM] iteration box with summary lines."""
+        change_count = len(files_changed)
+        magenta = self._colors.magenta
+        if self._is_tty:
+            self._print(self._box_mid("System task complete", color_fn=magenta))
+            if change_count == 0:
+                self._print(self._box_line("Files:        no changes", color_fn=magenta))
+            elif change_count == 1:
+                files_str = self._colors.yellow("1 file changed")
+                self._print(self._box_line(f"Files:        {files_str}", color_fn=magenta))
+            else:
+                files_str = self._colors.yellow(f"{change_count} files changed")
+                self._print(self._box_line(f"Files:        {files_str}", color_fn=magenta))
+            if duration is not None:
+                self._print(
+                    self._box_line(
+                        f"Time:         {format_human_duration(duration)}", color_fn=magenta
+                    )
+                )
+            self._print(self._box_bottom(color_fn=magenta))
+            self._print()
+        else:
+            if change_count == 0:
+                self._print("[ralph] System task: no changes")
+            elif change_count == 1:
+                self._print("[ralph] System task: 1 file changed")
+            else:
+                self._print(f"[ralph] System task: {change_count} files changed")
+            if duration is not None:
+                self._print(f"[ralph] System task time: {format_human_duration(duration)}")
 
     def rotation_complete(
         self,

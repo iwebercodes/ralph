@@ -199,6 +199,27 @@ class TestConsole:
         assert "no changes" in output
         assert "1/3" in output
 
+    def test_rotation_complete_non_tty_no_agent_removal(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Test no agent removal line shown when agent_removals is empty/None."""
+        console = Console(no_color=True)
+        # Default (no agent_removals arg) → None → () in function
+        console.rotation_complete(Status.DONE, [], 1)
+        output = capsys.readouterr().out
+        assert "Agent removed" not in output
+        assert "Agent:" not in output
+
+    def test_rotation_complete_non_tty_empty_removals(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Test no agent removal line shown when agent_removals is empty tuple."""
+        console = Console(no_color=True)
+        console.rotation_complete(Status.DONE, [], 1, agent_removals=())
+        output = capsys.readouterr().out
+        assert "Agent removed" not in output
+        assert "Agent:" not in output
+
     def test_test_result_non_tty(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Test test result for non-TTY output."""
         console = Console(no_color=True)
@@ -421,6 +442,27 @@ class TestConsoleTTY:
         agent_idx = output.index("Agent:        Codex removed (rate limit)")
         verify_idx = output.index("Verification: 1/3 [●○○]")
         assert files_idx < time_idx < agent_idx < verify_idx
+
+    def test_rotation_complete_tty_no_agent_removal(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Test no agent removal line shown when agent_removals is empty/None in TTY."""
+        console = Console(no_color=True)
+        console._is_tty = True
+        # Default (no agent_removals arg) → None → () in function
+        console.rotation_complete(Status.DONE, [], 1)
+        output = capsys.readouterr().out
+        assert "Agent:" not in output
+        assert "removed" not in output
+
+    def test_rotation_complete_tty_empty_removals(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Test no agent removal line shown when agent_removals is empty tuple in TTY."""
+        console = Console(no_color=True)
+        console._is_tty = True
+        console.rotation_complete(Status.DONE, [], 1, agent_removals=())
+        output = capsys.readouterr().out
+        assert "Agent:" not in output
+        assert "removed" not in output
 
     def test_rotation_complete_tty_done_complete(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Test rotation complete with DONE status at 3/3 for TTY."""

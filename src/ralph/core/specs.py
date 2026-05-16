@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -53,6 +54,69 @@ def discover_specs(root: Path | None = None) -> list[Spec]:
 
     specs.sort(key=spec_sort_key)
     return specs
+
+
+# Regex to match .every-[n].spec.md pattern at the end of a filename.
+# The name portion (before .every-) can contain any valid characters.
+# If multiple .every-[n] segments exist, we use the last one.
+_EVERY_N_RE = re.compile(r"\.every-(\d+)\.spec\.md$")
+
+
+def parse_every_n(rel_posix: str) -> int:
+    """Extract the schedule period from a spec path.
+
+    Matches the pattern ``.every-[n].spec.md`` at the end of the filename.
+    If there are multiple ``.every-[n]`` segments, uses the **last** one.
+    Returns 1 (regular spec — runs every rotation) when no valid pattern is found.
+
+    Valid: ``cleanup.every-3.spec.md`` -> 3
+    Valid: ``a.every-2.b.every-5.spec.md`` -> 5 (last match)
+    Invalid: ``my.every.spec.md`` -> 1 (no number after .every-)
+    Invalid: ``.every-.spec.md`` -> 1 (no number)
+    Invalid: ``.every-0.spec.md`` -> 1 (zero is not valid; not a system spec)
+    Invalid: ``.every-1.spec.md`` -> 1 (period of 1 is meaningless; treated as regular)
+    """
+    matches = _EVERY_N_RE.findall(rel_posix)
+    if not matches:
+        return 1
+    n = int(matches[-1])
+    return n if n > 1 else 1
+
+
+def is_system_spec(rel_posix: str) -> bool:
+    """A spec is a 'system spec' if its filename encodes a period > 1.
+
+    System specs run on every n-th iteration before the regular spec phase,
+    are stateless (no state.json entry), and use a dedicated prompt template.
+    """
+    return parse_every_n(rel_posix) > 1
+
+
+def system_spec_eligible(rel_posix: str, iteration: int) -> bool:
+    """Return True if the system spec should fire at this iteration."""
+    n = parse_every_n(rel_posix)
+    if n <= 1:
+        return False
+    return iteration % n == 0
+
+
+def split_specs(specs: list[Spec]) -> tuple[list[Spec], list[Spec]]:
+    """Partition discovered specs into (regular, system).
+
+    Regular specs (every_n == 1) flow through the existing 0→3 verification cycle.
+    System specs (every_n > 1) are sorted alphabetically by relative path so
+    that on iterations where multiple are eligible they fire in a deterministic
+    order.
+    """
+    regular: list[Spec] = []
+    system: list[Spec] = []
+    for spec in specs:
+        if is_system_spec(spec.rel_posix):
+            system.append(spec)
+        else:
+            regular.append(spec)
+    system.sort(key=lambda s: s.rel_posix)
+    return regular, system
 
 
 def spec_sort_key(spec: Spec) -> tuple[int, str]:

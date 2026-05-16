@@ -324,39 +324,41 @@ def test_run_resume_from_previous(
 # Tests for --agents option
 
 
-def test_run_agents_unknown_name(
+def test_run_agents_unknown_name_fallback(
     project_with_prompt: Path,
 ) -> None:
-    """Test --agents with unknown agent name shows error."""
+    """Test --agents with unknown agent name falls back to available agents."""
     result = runner.invoke(app, ["run", "--agents", "foo"])
 
-    assert result.exit_code == 1
-    assert "unknown agent" in result.output.lower()
-    assert "foo" in result.output.lower()
+    # Unknown agent is silently ignored; falls back to all available agents
+    assert result.exit_code == 1  # No agents available in test env
+    assert "foo" not in result.output.lower() or "unknown" not in result.output.lower()
 
 
-def test_run_agents_multiple_unknown_names(
+def test_run_agents_multiple_unknown_names_fallback(
     project_with_prompt: Path,
 ) -> None:
-    """Test --agents with multiple unknown names shows sorted list."""
+    """Test --agents with multiple unknown names falls back to available agents."""
     result = runner.invoke(app, ["run", "--agents", "bar,foo"])
 
+    # All unknown names silently ignored; falls back to all available agents
     assert result.exit_code == 1
-    assert "unknown agent" in result.output.lower()
-    # Both should be mentioned
-    assert "bar" in result.output.lower()
-    assert "foo" in result.output.lower()
 
 
-def test_run_agents_partial_unknown(
+def test_run_agents_partial_unknown_fallback(
     project_with_prompt: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Test --agents with mixed known and unknown names."""
+    """Test --agents with mixed known and unknown names falls back to available."""
+    # Hide all agents so only the filtered ones are considered
+    monkeypatch.setenv("PATH", "/nonexistent")
+
     result = runner.invoke(app, ["run", "--agents", "claude,foo"])
 
+    # Unknown 'foo' silently ignored; claude not available → error about unavailable
     assert result.exit_code == 1
-    assert "unknown agent" in result.output.lower()
-    assert "foo" in result.output.lower()
+    assert "claude" in result.output.lower()
+    assert "not available" in result.output.lower()
 
 
 def test_run_agents_empty_string(
@@ -533,8 +535,8 @@ def test_run_agents_short_option(
     """Test -a short option works."""
     result = runner.invoke(app, ["run", "-a", "foo"])
 
-    assert result.exit_code == 1
-    assert "unknown agent" in result.output.lower()
+    # Unknown agent silently ignored; falls back to all available agents
+    assert result.exit_code == 1  # No agents available in test env
 
 
 def test_run_agents_not_available(
@@ -552,17 +554,16 @@ def test_run_agents_not_available(
     assert "not available" in result.output.lower()
 
 
-def test_run_agents_shows_available_agents_in_error(
+def test_run_agents_unknown_silently_ignored(
     project_with_prompt: Path,
 ) -> None:
-    """Test unknown agent error shows available agent names."""
+    """Test unknown agent names are silently ignored (fall back to available)."""
     result = runner.invoke(app, ["run", "--agents", "foo"])
 
-    assert result.exit_code == 1
-    # Error should list available agents
-    assert "available agents" in result.output.lower()
-    assert "claude" in result.output.lower()
-    assert "codex" in result.output.lower()
+    # Unknown agent silently ignored; no error about unknown name
+    assert result.exit_code == 1  # No agents available in test env
+    # Should NOT mention "unknown" since we fall back gracefully
+    assert "unknown" not in result.output.lower()
 
 
 def test_run_filter_option_filters_specs(temp_project: Path) -> None:

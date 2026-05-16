@@ -9,7 +9,12 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, NamedTuple
 
-from ralph.core.specs import is_prompt_path, spec_content_hash, spec_resource_key
+from ralph.core.specs import (
+    is_prompt_path,
+    is_system_spec,
+    spec_content_hash,
+    spec_resource_key,
+)
 
 RALPH_DIR = ".ralph"
 HANDOFF_FILE = "handoff.md"
@@ -45,7 +50,12 @@ class RalphState(NamedTuple):
 
 @dataclass(frozen=True)
 class SpecProgress:
-    """Progress tracking for a single spec."""
+    """Progress tracking for a single regular spec.
+
+    Only regular specs (every_n == 1) appear in state.json. System specs
+    (filenames matching ``*.every-[n].spec.md`` where n > 1) are stateless —
+    discovered fresh from the filesystem each iteration.
+    """
 
     path: str
     done_count: int = 0
@@ -249,18 +259,30 @@ def ensure_state(
     spec_paths: list[str],
     root: Path | None = None,
 ) -> MultiSpecState:
-    """Load state.json and sync with the current spec list."""
+    """Load state.json and sync with the current spec list.
+
+    Only regular specs (filenames without a valid ``.every-[n]`` period > 1)
+    are persisted in state.json. System specs are stateless and discovered
+    fresh from the filesystem each iteration. If a regular spec is renamed
+    into a system spec, its state entry is dropped here; if a system spec is
+    renamed into a regular spec, a fresh entry is created.
+    """
     if root is None:
         root = Path.cwd()
 
     _ensure_dirs(root)
 
+    # System specs do not have state entries.
+    regular_spec_paths = [path for path in spec_paths if not is_system_spec(path)]
+
     state = read_multi_state(root)
-    spec_set = set(spec_paths)
+    spec_set = set(regular_spec_paths)
 
     if state is None:
         legacy = _legacy_state(root)
-        specs = [SpecProgress(path=path, done_count=0, last_hash=None) for path in spec_paths]
+        specs = [
+            SpecProgress(path=path, done_count=0, last_hash=None) for path in regular_spec_paths
+        ]
         if len(specs) == 1:
             specs[0] = SpecProgress(path=specs[0].path, done_count=legacy.done_count)
         state = MultiSpecState(
@@ -271,24 +293,30 @@ def ensure_state(
             specs=specs,
         )
         write_multi_state(state, root)
-        _migrate_legacy_assets(spec_paths, root)
+        _migrate_legacy_assets(regular_spec_paths, root)
         _ensure_spec_resources(spec_paths, root)
         return state
 
-    existing_paths = [spec.path for spec in state.specs]
+    # Drop any persisted entries that no longer correspond to a regular spec
+    # (e.g., a regular spec was renamed into a system spec).
+    existing_regulars = [spec for spec in state.specs if not is_system_spec(spec.path)]
+    existing_paths = [spec.path for spec in existing_regulars]
     existing_set = set(existing_paths)
-    spec_set_changed = spec_set != existing_set
+    dropped_system_entries = len(existing_regulars) != len(state.specs)
+    spec_set_changed = spec_set != existing_set or dropped_system_entries
 
     current_path = None
     if state.specs and 0 <= state.current_index < len(state.specs):
-        current_path = state.specs[state.current_index].path
+        candidate_path = state.specs[state.current_index].path
+        if candidate_path in spec_set:
+            current_path = candidate_path
 
     # Preserve existing order for existing specs; append new specs in discovery order.
     path_order = [path for path in existing_paths if path in spec_set]
-    path_order.extend(path for path in spec_paths if path not in existing_set)
+    path_order.extend(path for path in regular_spec_paths if path not in existing_set)
 
     new_specs: list[SpecProgress] = []
-    existing_map = {spec.path: spec for spec in state.specs}
+    existing_map = {spec.path: spec for spec in existing_regulars}
     migrated_hashes = False
     spec_infos: list[tuple[str, int, str | None, str | None, bool, bool]] = []
     for path in path_order:

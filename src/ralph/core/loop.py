@@ -12,7 +12,7 @@ from typing import NamedTuple
 from ralph.core.agent import Agent, AgentResult
 from ralph.core.ignore import create_spec, load_ignore_patterns
 from ralph.core.pool import AgentPool
-from ralph.core.prompt import assemble_prompt
+from ralph.core.prompt import assemble_prompt, assemble_system_prompt
 from ralph.core.run_state import (
     RunState,
     delete_run_state,
@@ -24,9 +24,12 @@ from ralph.core.snapshot import compare_snapshots, take_snapshot
 from ralph.core.specs import (
     Spec,
     discover_specs,
+    parse_every_n,
     read_spec_content,
     sort_specs_by_state,
     spec_content_hash,
+    split_specs,
+    system_spec_eligible,
 )
 from ralph.core.state import (
     MultiSpecState,
@@ -36,7 +39,6 @@ from ralph.core.state import (
     get_handoff_path,
     read_guardrails,
     read_handoff,
-    read_multi_state,
     read_status,
     write_done_count,
     write_handoff,
@@ -336,6 +338,41 @@ def run_iteration(
     )
 
 
+def _downgrade_done_specs(
+    state: MultiSpecState, exclude_index: int | None = None
+) -> MultiSpecState:
+    """Downgrade any regular spec at 3/3 to 2/3.
+
+    Applied when a spec turn (regular or system) modifies project files.
+    Optionally skips ``exclude_index`` — the spec that caused the change
+    when called from the regular phase. System specs aren't in ``state.specs``,
+    so for the system phase call this with ``exclude_index=None``.
+    """
+    specs = list(state.specs)
+    changed = False
+    for idx, spec in enumerate(specs):
+        if idx == exclude_index:
+            continue
+        if spec.done_count >= 3:
+            specs[idx] = SpecProgress(
+                path=spec.path,
+                done_count=2,
+                last_status=spec.last_status,
+                last_hash=spec.last_hash,
+                modified_files=spec.modified_files,
+            )
+            changed = True
+    if not changed:
+        return state
+    return MultiSpecState(
+        version=state.version,
+        iteration=state.iteration,
+        status=state.status,
+        current_index=state.current_index,
+        specs=specs,
+    )
+
+
 def handle_status(
     state: MultiSpecState,
     spec_index: int,
@@ -457,17 +494,6 @@ def _get_spec_states(
     }
 
 
-def _sort_specs_for_run(specs: list[Spec], root: Path) -> list[Spec]:
-    """Sort specs by priority for this run.
-
-    New specs and modified specs come first, then non-DONE, then DONE.
-    Within DONE specs, those that modified files come before those that didn't.
-    """
-    existing_state = read_multi_state(root)
-    spec_states = _get_spec_states(existing_state)
-    return sort_specs_by_state(specs, spec_states, root)
-
-
 def _filter_specs(specs: list[Spec], spec_filter: str | None) -> list[Spec]:
     """Filter specs by case-insensitive substring against basename."""
     if spec_filter is None:
@@ -476,21 +502,20 @@ def _filter_specs(specs: list[Spec], spec_filter: str | None) -> list[Spec]:
     return [spec for spec in specs if needle in spec.path.name.lower()]
 
 
-def _all_candidates_done(state: MultiSpecState, candidate_paths: set[str]) -> bool:
-    """True when all candidate specs are verified done (3/3)."""
-    if not candidate_paths:
-        return False
-    candidates = [spec for spec in state.specs if spec.path in candidate_paths]
-    if not candidates:
-        return False
-    return all(spec.done_count >= 3 for spec in candidates)
+def _all_specs_done(state: MultiSpecState) -> bool:
+    """True when every regular spec is verified (done_count >= 3)."""
+    return all(spec.done_count >= 3 for spec in state.specs)
 
 
 def _select_best_index(
     state: MultiSpecState,
     prioritized_paths: list[str],
 ) -> int:
-    """Select index of highest-priority spec that still needs work."""
+    """Select index of the highest-priority regular spec that still needs work.
+
+    System specs are not in ``state.specs`` — they fire on their own schedule
+    in the system phase before this selector runs.
+    """
     best_index = state.current_index if 0 <= state.current_index < len(state.specs) else 0
     for path in prioritized_paths:
         spec_idx = next((i for i, s in enumerate(state.specs) if s.path == path), None)
@@ -503,6 +528,183 @@ def _select_best_index(
     return best_index
 
 
+def run_system_iteration(
+    iteration: int,
+    max_iter: int,
+    agent: Agent,
+    spec_path: str,
+    spec_goal: str,
+    period: int,
+    root: Path | None = None,
+    timeout: int | None = 10800,
+    output_file: Path | None = None,
+) -> tuple[list[str], AgentResult]:
+    """Run one system spec turn.
+
+    Builds a system-spec prompt (no IMPLEMENT/REVIEW marker, no handoff), invokes
+    the agent, snapshots project files, writes a history entry, and returns
+    ``(files_changed, agent_result)``. The status file written by the agent is
+    intentionally ignored — system specs have no completion signal.
+    """
+    if root is None:
+        root = Path.cwd()
+
+    patterns = load_ignore_patterns(root)
+    ignore_spec = create_spec(patterns)
+
+    snapshot_before = take_snapshot(root, ignore_spec)
+
+    guardrails = read_guardrails(root)
+    prompt = assemble_system_prompt(
+        iteration=iteration,
+        max_iter=max_iter,
+        period=period,
+        goal=spec_goal or "",
+        guardrails=guardrails,
+        spec_path=spec_path,
+    )
+
+    # System specs do not produce a completion status. Reset the status file
+    # so anything the agent writes is overwritten back to IDLE before the
+    # regular phase reads it.
+    write_status(Status.IDLE, root)
+
+    if output_file is not None:
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_file.write_text("", encoding="utf-8")
+
+    result = agent.invoke(prompt, timeout=timeout, output_file=output_file)
+
+    # Discard whatever the agent wrote to status — the loop ignores it.
+    write_status(Status.IDLE, root)
+
+    snapshot_after = take_snapshot(root, ignore_spec)
+    files_changed = compare_snapshots(snapshot_before, snapshot_after)
+
+    log_content = format_log_entry(
+        iteration=iteration,
+        prompt=prompt,
+        agent_output=result.output,
+        agent_name=f"{agent.name} [SYSTEM]",
+        status=Status.IDLE,
+        files_changed=files_changed,
+        test_result=None,
+        agent_error=result.error,
+        agent_exit_code=result.exit_code,
+        crash_summary=None,
+    )
+    write_history(iteration, log_content, root, spec_path)
+
+    return files_changed, result
+
+
+def _select_best_index_for_specs(
+    state: MultiSpecState,
+    regular_specs: list[Spec],
+    root: Path,
+) -> int:
+    """Choose the next regular spec index from the given regular-spec list."""
+    if not state.specs or not regular_specs:
+        return state.current_index if state.specs else 0
+    paths = {spec.rel_posix for spec in regular_specs}
+    spec_states = _get_spec_states(state)
+    sorted_specs = sort_specs_by_state(regular_specs, spec_states, root)
+    prioritized = [spec.rel_posix for spec in sorted_specs if spec.rel_posix in paths]
+    return _select_best_index(state, prioritized)
+
+
+def _resolve_regular_index(
+    state: MultiSpecState,
+    regular_specs: list[Spec],
+    root: Path,
+) -> int:
+    """Resolve the regular spec index for this turn.
+
+    Preserves the regular-spec focused-execution behavior: if the currently
+    selected regular spec is still in-progress (done_count < 3), stay on it.
+    Otherwise re-pick by priority among regular specs that still have work.
+    """
+    if not state.specs:
+        return 0
+    current_idx = state.current_index if 0 <= state.current_index < len(state.specs) else 0
+    current = state.specs[current_idx]
+    if current.done_count < 3:
+        return current_idx
+    return _select_best_index_for_specs(state, regular_specs, root)
+
+
+def _run_system_phase(
+    iteration: int,
+    max_iter: int,
+    system_specs: list[Spec],
+    agent_pool: AgentPool,
+    state: MultiSpecState,
+    root: Path,
+    timeout: int | None,
+    on_system_iteration_start: (Callable[[int, int, str, str, int], None] | None),
+    on_system_iteration_end: (Callable[[int, list[str], str, str, int], None] | None),
+) -> tuple[MultiSpecState, bool, tuple[tuple[str, str], ...]]:
+    """Run every eligible system spec for this iteration.
+
+    Returns ``(updated_state, any_files_changed, agent_removals)``.
+    When any system spec modifies project files, regular specs at 3/3 are
+    downgraded to 2/3 within the same iteration so the subsequent regular
+    phase sees the post-downgrade state.
+    """
+    any_changes = False
+    removals: tuple[tuple[str, str], ...] = ()
+    for sys_spec in system_specs:
+        period = parse_every_n(sys_spec.rel_posix)
+        if not system_spec_eligible(sys_spec.rel_posix, iteration):
+            continue
+        if agent_pool.is_empty():
+            break
+        agent = agent_pool.select_random()
+        spec_goal = read_spec_content(sys_spec.path) or ""
+        output_file = get_current_log_path(root)
+        write_run_state(
+            RunState(
+                pid=os.getpid(),
+                started_at=now_iso(),
+                iteration=iteration,
+                max_iterations=max_iter,
+                agent=f"{agent.name} [SYSTEM]",
+                agent_started_at=now_iso(),
+            ),
+            root,
+        )
+        if on_system_iteration_start:
+            on_system_iteration_start(iteration, max_iter, agent.name, sys_spec.rel_posix, period)
+
+        files_changed, agent_result = run_system_iteration(
+            iteration=iteration,
+            max_iter=max_iter,
+            agent=agent,
+            spec_path=sys_spec.rel_posix,
+            spec_goal=spec_goal,
+            period=period,
+            root=root,
+            timeout=timeout,
+            output_file=output_file,
+        )
+
+        if agent.is_exhausted(agent_result):
+            reason = agent.exhaustion_reason(agent_result) or "exhausted"
+            removals = removals + ((agent.name, reason),)
+            agent_pool.remove(agent)
+
+        if files_changed:
+            any_changes = True
+            state = _downgrade_done_specs(state, exclude_index=None)
+
+        if on_system_iteration_end:
+            on_system_iteration_end(
+                iteration, files_changed, agent.name, sys_spec.rel_posix, period
+            )
+
+    return state, any_changes, removals
+
+
 def run_loop(
     max_iter: int = 20,
     test_cmd: str | None = None,
@@ -512,16 +714,36 @@ def run_loop(
     on_iteration_end: Callable[[int, IterationResult, int, str, str], None] | None = None,
     timeout: int | None = 10800,
     spec_filter: str | None = None,
+    on_system_iteration_start: (Callable[[int, int, str, str, int], None] | None) = None,
+    on_system_iteration_end: (Callable[[int, list[str], str, str, int], None] | None) = None,
 ) -> LoopResult:
     """Run the main Ralph loop.
 
+    Each loop turn is a single ``iteration`` and proceeds in four steps:
+
+    1. **Exit check** — consider regular specs only. Exit 0 if no regular spec
+       exists (system specs cannot drive a loop) or all are verified at 3/3.
+    2. **System phase** — for every system spec where
+       ``iteration % every_n == 0``, run it in alphabetical order. File changes
+       trigger the same downgrade rule as a regular spec (any regular at 3/3 →
+       2/3) within this iteration.
+    3. **Regular phase** — select the highest-priority regular spec and run one
+       turn of it. ``handle_status`` may signal an exit (STUCK or all-done).
+    4. **Advance** — the iteration counter advances by exactly one.
+
     Args:
         max_iter: Maximum number of iterations
-        test_cmd: Optional test command to run after each iteration
+        test_cmd: Optional test command to run after each regular iteration
         root: Project root directory
         agent_pool: Pool of agents to use (required)
         on_iteration_start: Callback(iteration, max_iter, done_count, agent_name, spec_path)
+            fired for the regular phase only.
         on_iteration_end: Callback(iteration, result, done_count, agent_name, spec_path)
+            fired for the regular phase only.
+        on_system_iteration_start: Callback(iteration, max_iter, agent_name, spec_path, period)
+            fired for each system spec turn.
+        on_system_iteration_end: Callback(iteration, files_changed, agent_name, spec_path, period)
+            fired for each system spec turn.
         timeout: Timeout in seconds per rotation (default 3 hours), None for no timeout
 
     Returns:
@@ -536,28 +758,24 @@ def run_loop(
     all_specs = discover_specs(root)
     if not all_specs:
         return LoopResult(1, "No spec files found", 0)
-    specs = _filter_specs(all_specs, spec_filter)
-    if spec_filter is not None and not specs:
+    filtered_all = _filter_specs(all_specs, spec_filter)
+    if spec_filter is not None and not filtered_all:
         return LoopResult(1, "No specs match filter criteria", 0)
 
-    # Ensure state is up to date with discovered specs
-    state = ensure_state([spec.rel_posix for spec in all_specs], root)
+    regular_specs, system_specs = split_specs(filtered_all)
 
-    if spec_filter is not None:
-        candidate_paths = {spec.rel_posix for spec in specs}
-        if _all_candidates_done(state, candidate_paths):
-            return LoopResult(0, "Goal achieved!", 0)
-    elif state.specs and all(spec.done_count >= 3 for spec in state.specs):
+    # Persisted state only tracks regular specs.
+    state = ensure_state([s.rel_posix for s in regular_specs], root)
+
+    # Exit check before any work: no regulars or all done → exit 0
+    if not regular_specs:
+        return LoopResult(0, "Goal achieved!", 0)
+    if state.specs and _all_specs_done(state):
         return LoopResult(0, "Goal achieved!", 0)
 
-    # Sort specs by priority and select the highest priority one
-    sorted_specs = _sort_specs_for_run(specs, root)
-    sorted_paths = [spec.rel_posix for spec in sorted_specs]
-
-    best_index = _select_best_index(state, sorted_paths)
-
-    # Update current_index to the highest priority spec
-    if state.current_index != best_index:
+    # Select initial best regular spec
+    best_index = _select_best_index_for_specs(state, regular_specs, root)
+    if state.specs and state.current_index != best_index:
         state = MultiSpecState(
             version=state.version,
             iteration=state.iteration,
@@ -566,6 +784,7 @@ def run_loop(
             specs=state.specs,
         )
         write_multi_state(state, root)
+
     iteration = state.iteration
     iterations_run = 0
     started_at = now_iso()
@@ -582,49 +801,80 @@ def run_loop(
 
     try:
         while iteration < max_iter:
-            if spec_filter is not None:
-                all_specs_now = discover_specs(root)
-                filtered_now = _filter_specs(all_specs_now, spec_filter)
-                if not filtered_now:
-                    return LoopResult(1, "No specs match filter criteria", iterations_run)
-                state = ensure_state([spec.rel_posix for spec in all_specs_now], root)
-                if _all_candidates_done(state, {spec.rel_posix for spec in filtered_now}):
-                    return LoopResult(0, "Goal achieved!", iterations_run)
-            elif state.specs and all(spec.done_count >= 3 for spec in state.specs):
-                return LoopResult(0, "Goal achieved!", iterations_run)
-
-            # Check if we have any agents left
-            if agent_pool.is_empty():
-                return LoopResult(4, "All agents exhausted", iterations_run)
-
+            # Re-discover each turn so newly added specs are picked up.
             all_specs = discover_specs(root)
             if not all_specs:
                 return LoopResult(1, "No spec files found", iterations_run)
-            specs = _filter_specs(all_specs, spec_filter)
-            if spec_filter is not None and not specs:
+            filtered_all = _filter_specs(all_specs, spec_filter)
+            if spec_filter is not None and not filtered_all:
                 return LoopResult(1, "No specs match filter criteria", iterations_run)
+            regular_specs, system_specs = split_specs(filtered_all)
 
-            state = ensure_state([spec.rel_posix for spec in all_specs], root)
-            spec_map = {spec.rel_posix: spec for spec in all_specs}
+            state = ensure_state([s.rel_posix for s in regular_specs], root)
 
-            # Filtered runs always re-prioritize against the filtered candidate set.
-            if spec_filter is not None:
-                prioritized_paths = [spec.rel_posix for spec in _sort_specs_for_run(specs, root)]
-                next_index = _select_best_index(state, prioritized_paths)
-                if state.current_index != next_index:
-                    state = MultiSpecState(
-                        version=state.version,
-                        iteration=state.iteration,
-                        status=state.status,
-                        current_index=next_index,
-                        specs=state.specs,
-                    )
+            # === Step 1: Exit check ===
+            if not regular_specs:
+                return LoopResult(0, "Goal achieved!", iterations_run)
+            if _all_specs_done(state):
+                return LoopResult(0, "Goal achieved!", iterations_run)
+
+            if agent_pool.is_empty():
+                return LoopResult(4, "All agents exhausted", iterations_run)
+
+            # Compute this turn's iteration number — used for system spec
+            # eligibility and for display.
+            this_iteration = iteration + 1
+
+            # === Step 2: System phase ===
+            sys_files_changed = False
+            if system_specs:
+                state, sys_files_changed, sys_removals = _run_system_phase(
+                    iteration=this_iteration,
+                    max_iter=max_iter,
+                    system_specs=system_specs,
+                    agent_pool=agent_pool,
+                    state=state,
+                    root=root,
+                    timeout=timeout,
+                    on_system_iteration_start=on_system_iteration_start,
+                    on_system_iteration_end=on_system_iteration_end,
+                )
+                # System phase may have downgraded specs — persist before
+                # the regular phase reads state.
+                if sys_files_changed:
                     write_multi_state(state, root)
+                if agent_pool.is_empty():
+                    # No agents left after the system phase.
+                    return LoopResult(4, "All agents exhausted", iterations_run)
 
-            # Select an agent for this iteration
+                # Surface system-spec agent removals via the next regular result.
+                pending_removals = sys_removals
+            else:
+                pending_removals = ()
+
+            # === Step 3: Regular phase ===
+            # If the system phase downgraded specs, re-prioritize so the
+            # regular phase picks up the new priority landscape. Otherwise
+            # preserve focused execution: stay on the current spec while it
+            # still has work.
+            if sys_files_changed:
+                regular_index = _select_best_index_for_specs(state, regular_specs, root)
+            else:
+                regular_index = _resolve_regular_index(state, regular_specs, root)
+            if state.specs and state.current_index != regular_index:
+                state = MultiSpecState(
+                    version=state.version,
+                    iteration=state.iteration,
+                    status=state.status,
+                    current_index=regular_index,
+                    specs=state.specs,
+                )
+                write_multi_state(state, root)
+
             agent = agent_pool.select_random()
 
-            iteration += 1
+            # Advance the iteration counter for this turn.
+            iteration = this_iteration
             state = MultiSpecState(
                 version=state.version,
                 iteration=iteration,
@@ -648,8 +898,12 @@ def run_loop(
                 root,
             )
 
+            current_spec = state.specs[state.current_index]
+            regular_map = {s.rel_posix: s for s in regular_specs}
+            spec = regular_map[current_spec.path]
+            spec_goal = read_spec_content(spec.path) or ""
+
             if on_iteration_start:
-                current_spec = state.specs[state.current_index]
                 on_iteration_start(
                     iteration,
                     max_iter,
@@ -659,10 +913,6 @@ def run_loop(
                 )
 
             output_file = get_current_log_path(root)
-            current_spec = state.specs[state.current_index]
-            spec = spec_map[current_spec.path]
-            spec_goal = read_spec_content(spec.path) or ""
-
             result = run_iteration(
                 iteration,
                 max_iter,
@@ -679,10 +929,12 @@ def run_loop(
             agent_exhausted = False
             if result.agent_result and agent.is_exhausted(result.agent_result):
                 reason = agent.exhaustion_reason(result.agent_result) or "exhausted"
-                removals = result.agent_removals + ((agent.name, reason),)
-                result = result._replace(agent_removals=removals)
+                pending_removals = pending_removals + ((agent.name, reason),)
                 agent_pool.remove(agent)
                 agent_exhausted = True
+
+            if pending_removals:
+                result = result._replace(agent_removals=result.agent_removals + pending_removals)
 
             current_hash = spec_content_hash(spec.path)
             action, exit_code, state, spec_done_count = handle_status(
@@ -719,101 +971,60 @@ def run_loop(
                 else:
                     return LoopResult(exit_code or 1, "Unknown error", iterations_run)
 
-            # Determine next spec based on focused execution rules
-            if state.specs:
-                if spec_filter is not None:
-                    refreshed_all_specs = discover_specs(root)
-                    if not refreshed_all_specs:
-                        return LoopResult(1, "No spec files found", iterations_run)
-                    refreshed_filtered = _filter_specs(refreshed_all_specs, spec_filter)
-                    if not refreshed_filtered:
-                        return LoopResult(1, "No specs match filter criteria", iterations_run)
-                    state = ensure_state(
-                        [spec.rel_posix for spec in refreshed_all_specs],
-                        root,
-                    )
-                    prioritized_paths = [
-                        spec.rel_posix for spec in _sort_specs_for_run(refreshed_filtered, root)
-                    ]
-                    next_index = _select_best_index(state, prioritized_paths)
-                    state = MultiSpecState(
-                        version=state.version,
-                        iteration=state.iteration,
-                        status=state.status,
-                        current_index=next_index,
-                        specs=state.specs,
-                    )
-                    write_multi_state(state, root)
-                    continue
+            # Apply focused-execution rules to pick the regular spec for the
+            # NEXT turn. System specs do not participate here — they fire on
+            # their own schedule in step 2.
+            all_specs_after = discover_specs(root)
+            if not all_specs_after:
+                return LoopResult(1, "No spec files found", iterations_run)
+            filtered_after = _filter_specs(all_specs_after, spec_filter)
+            if spec_filter is not None and not filtered_after:
+                return LoopResult(1, "No specs match filter criteria", iterations_run)
+            regular_after, _system_after = split_specs(filtered_after)
+            previous_regular_paths = {spec.path for spec in state.specs}
+            state = ensure_state([s.rel_posix for s in regular_after], root)
 
-                previous_paths = {spec.path for spec in state.specs}
-                # Re-discover specs to check for new/modified/removed files
-                new_specs = discover_specs(root)
-                if not new_specs:
-                    return LoopResult(1, "No spec files found", iterations_run)
+            sorted_regular = sort_specs_by_state(regular_after, _get_spec_states(state), root)
+            sorted_paths = [spec.rel_posix for spec in sorted_regular]
+            discovered_paths = {spec.rel_posix for spec in regular_after}
+            added_paths = discovered_paths - previous_regular_paths
 
-                # Update state with current spec discovery
-                state = ensure_state([spec.rel_posix for spec in new_specs], root)
+            if not state.specs:
+                # All regular specs removed mid-run.
+                continue
 
-                # Sort specs by priority
-                sorted_specs = _sort_specs_for_run(new_specs, root)
-                sorted_paths = [spec.rel_posix for spec in sorted_specs]
-                discovered_paths = {spec.rel_posix for spec in new_specs}
-                added_paths = discovered_paths - previous_paths
+            current_spec_after = state.specs[state.current_index]
+            current_status = result.status
+            current_had_changes = bool(result.files_changed)
 
-                # Get current spec status
-                current_spec_status = result.status
-                current_had_changes = bool(result.files_changed)
-
-                # Determine next spec index
-                next_index = state.current_index
-
-                # Only switch specs if current spec is DONE with no changes AND fully verified (3/3)
-                current_spec = state.specs[state.current_index]
-                if (
-                    current_spec_status == Status.DONE
-                    and not current_had_changes
-                    and current_spec.done_count >= 3
-                ):
-                    # Current spec is fully complete (3/3).
-                    # Find the next highest-priority spec that needs work,
-                    # preferring others over current.
-                    current_spec_path = state.specs[state.current_index].path
-                    found_alternative = False
-
-                    # First pass: look for other specs that need work
-                    for path in sorted_paths:
-                        if path == current_spec_path:
-                            continue  # Skip current spec in first pass
-                        sp: SpecProgress | None = next(
-                            (s for s in state.specs if s.path == path), None
+            next_index = state.current_index
+            if (
+                current_status == Status.DONE
+                and not current_had_changes
+                and current_spec_after.done_count >= 3
+            ):
+                # Current spec is fully verified — look for another that needs work.
+                for path in sorted_paths:
+                    if path == current_spec_after.path:
+                        continue
+                    alt = next((s for s in state.specs if s.path == path), None)
+                    if alt and alt.done_count < 3:
+                        next_index = next(
+                            (i for i, s in enumerate(state.specs) if s.path == path),
+                            state.current_index,
                         )
-                        if sp and sp.done_count < 3:
-                            # Found an alternative spec that needs work
-                            next_index = next(
-                                (i for i, s in enumerate(state.specs) if s.path == path),
-                                state.current_index,
-                            )
-                            found_alternative = True
-                            break
+                        break
+            else:
+                # New specs always interrupt focused execution.
+                for path in sorted_paths:
+                    if path in added_paths:
+                        next_index = next(
+                            (i for i, s in enumerate(state.specs) if s.path == path),
+                            state.current_index,
+                        )
+                        break
 
-                    # Second pass: if no alternatives, check if current spec still needs work
-                    if not found_alternative and current_spec.done_count < 3:
-                        # Current spec is the only one that needs work, continue with it
-                        next_index = state.current_index
-                else:
-                    # Current spec needs more work (CONTINUE/ROTATE/STUCK or DONE with changes)
-                    # Only switch if there's a completely new spec (highest priority exception)
-                    for path in sorted_paths:
-                        if path in added_paths:
-                            # New specs always interrupt current work.
-                            next_index = next(
-                                (i for i, s in enumerate(state.specs) if s.path == path),
-                                state.current_index,
-                            )
-                            break
-                    # If no new specs found, stay on current spec (focused execution)
-
+            if state.current_index != next_index:
                 state = MultiSpecState(
                     version=state.version,
                     iteration=state.iteration,

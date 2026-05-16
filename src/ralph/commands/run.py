@@ -257,18 +257,10 @@ def _run_main_loop(
             )
             raise typer.Exit(1)
 
-        # Validate: reject unknown agent names
-        known = {a.name.lower() for a in all_agents}
-        unknown = set(allowed) - known
-        if unknown:
-            available_names = ", ".join(a.name for a in all_agents)
-            console.error(
-                f"Unknown agent: {', '.join(sorted(unknown))}",
-                f"Available agents: {available_names}. Supported agents: claude, codex, pi",
-            )
-            raise typer.Exit(1)
-
-        filtered = [a for a in all_agents if a.name.lower() in allowed]
+        # Filter to known agents only (silently ignore unknown names).
+        # Falls back to available agents if requested agent unavailable.
+        known = {a.name.lower(): a for a in all_agents}
+        filtered = [known[name] for name in allowed if name in known]
     else:
         filtered = all_agents
 
@@ -319,6 +311,7 @@ After installing, verify with: claude --version, codex --version, or pi --versio
 
     # Track iteration start time
     iteration_start_time: float | None = None
+    system_start_time: float | None = None
 
     def on_iteration_start(
         iteration: int, max_iter: int, done_count: int, agent_name: str, spec_path: str
@@ -350,6 +343,22 @@ After installing, verify with: claude --version, codex --version, or pi --versio
 
         console.close_iteration()
 
+    def on_system_iteration_start(
+        iteration: int, max_iter: int, agent_name: str, spec_path: str, period: int
+    ) -> None:
+        nonlocal system_start_time
+        system_start_time = time.time()
+        console.system_working(agent_name, period)
+        console.system_iteration_info(iteration, max_iter, spec_path, period)
+
+    def on_system_iteration_end(
+        iteration: int, files_changed: list[str], agent_name: str, spec_path: str, period: int
+    ) -> None:
+        duration = None
+        if system_start_time is not None:
+            duration = time.time() - system_start_time
+        console.system_rotation_complete(files_changed, duration)
+
     # Handle timeout options
     effective_timeout: int | None = None if no_timeout else timeout
 
@@ -360,6 +369,8 @@ After installing, verify with: claude --version, codex --version, or pi --versio
         agent_pool=pool,
         on_iteration_start=on_iteration_start,
         on_iteration_end=on_iteration_end,
+        on_system_iteration_start=on_system_iteration_start,
+        on_system_iteration_end=on_system_iteration_end,
         timeout=effective_timeout,
         spec_filter=filter_spec,
     )

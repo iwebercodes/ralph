@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import shutil
@@ -9,7 +10,7 @@ import subprocess  # nosec B404 - subprocess needed for agent execution
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import NamedTuple, Protocol, TextIO
+from typing import Any, NamedTuple, Protocol, TextIO
 
 
 class AgentResult(NamedTuple):
@@ -486,6 +487,27 @@ def _format_duration(seconds: int) -> str:
     )
 
 
+def _terminate_process(process: subprocess.Popen[Any]) -> None:
+    """Terminate a subprocess, trying terminate() first for proper cleanup.
+
+    On Windows, process.terminate() sends WM_CLOSE which allows the process
+    and its children to shut down gracefully. process.kill() sends SIGKILL
+    equivalent which may leave child processes orphaned.
+    """
+    try:
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            # terminate() didn't work; force kill as last resort
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                process.kill()
+                process.wait(timeout=5)
+    except OSError:
+        # Process already exited
+        pass
+
+
 def _invoke_command(
     cmd: list[str],
     timeout: int | None,
@@ -585,11 +607,10 @@ def _invoke_with_streaming(
                 except subprocess.TimeoutExpired:
                     elapsed += poll_interval
                     if timeout is not None and elapsed >= timeout:
-                        process.kill()
-                        process.wait()
+                        _terminate_process(process)
                         raise subprocess.TimeoutExpired(cmd, timeout) from None
         except subprocess.TimeoutExpired:
-            process.kill()
+            _terminate_process(process)
             process.wait()
             raise
         finally:

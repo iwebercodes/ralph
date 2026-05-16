@@ -160,6 +160,69 @@ Write ONE of these to .ralph/status (the folder and the file exist already):
 """
 
 
+PROMPT_TEMPLATE_SYSTEM = """# RALPH LOOP - ROTATION {iteration}/{max_iter} [SYSTEM]
+
+You are operating in a **Ralph Loop**, and this rotation is a periodic
+**system task**. System tasks fire on a fixed schedule (every {period} iterations)
+alongside the project's regular work — they are completely separate from the
+regular-spec verification cycle and do not participate in it.
+
+## YOUR TASK
+
+System spec file: {spec_path}
+
+---
+{goal}
+---
+
+## EXECUTION CONTEXT
+
+- This task runs every {period} iterations as a maintenance/cleanup step.
+- Your work is **stateless from the loop's perspective**: there is no handoff,
+  no done-count, and no CONTINUE/ROTATE/DONE/STUCK signal to emit. Anything you
+  write to .ralph/status will be ignored.
+- The only durable effects you can have are:
+  1. Changes to **project files** (these will be detected by the loop and may
+     trigger re-verification of regular specs whose work is now considered stale).
+  2. Notes added to **.ralph/guardrails.md** (these are surfaced to all future
+     rotations — regular and system — so use guardrails for lessons that should
+     persist).
+- Do **not** edit .ralph/handoffs/* — those belong to regular specs.
+
+## GUARDRAILS
+
+Lessons from previous rotations. Follow these strictly.
+
+---
+{guardrails}
+---
+
+### Updating Guardrails
+
+If you discover something worth preserving (a recurring failure mode, a
+non-obvious project convention, a constraint that only becomes apparent during
+this maintenance task), append it to .ralph/guardrails.md. Good guardrails are
+specific, actionable, and about THIS project.
+
+## INSTRUCTIONS
+
+1. **Orient**: Read the system spec ({spec_path}) and understand the task.
+2. **Execute**: Do the maintenance work in one pass. Be surgical — system tasks
+   should be short and focused.
+3. **Persist**: If durable, project files or guardrails are your only outlets.
+4. **Clean Up**: Remove any temporary files or scripts you created.
+
+## RULES
+
+- NEVER modify spec files (PROMPT.md, *.spec.md in folders "specs" and ".ralph/specs")
+  unless the spec explicitly asks you to.
+- DO NOT write a completion status to .ralph/status — the loop ignores it.
+- DO NOT modify .ralph/state.json or .ralph/handoffs/*.
+- DO NOT attempt to drive the loop or signal completion of the overall project
+  from this prompt — that is a regular-spec responsibility.
+"""
+
+
 def get_mode(done_count: int) -> str:
     """Get the mode string based on done count."""
     return "REVIEW" if done_count > 0 else "IMPLEMENT"
@@ -197,3 +260,22 @@ def assemble_prompt(
             spec_path=spec_path,
             handoff_path=handoff_path,
         )
+
+
+def assemble_system_prompt(
+    iteration: int,
+    max_iter: int,
+    period: int,
+    goal: str,
+    guardrails: str,
+    spec_path: str,
+) -> str:
+    """Assemble the prompt for a system spec (periodic, stateless task)."""
+    return PROMPT_TEMPLATE_SYSTEM.format(
+        iteration=iteration,
+        max_iter=max_iter,
+        period=period,
+        goal=goal,
+        guardrails=guardrails,
+        spec_path=spec_path,
+    )
