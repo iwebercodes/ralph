@@ -98,13 +98,15 @@ def test_assemble_prompt_review_contains_verification() -> None:
 
     # Check required sections for REVIEW mode
     assert "[REVIEW]" in prompt
-    assert "CLAIMED STATE" in prompt
-    assert "DO NOT TRUST BLINDLY" in prompt
     assert "Be Skeptical" in prompt
     assert "Verify Independently" in prompt
+    assert "do not take claims at face value" in prompt
     assert "VERIFICATION PROTOCOL" in prompt
     assert "verification pass 2 of 3" in prompt
     assert "rubber-stamp" in prompt
+    # REVIEW must NOT contain handoff content or references
+    assert "CLAIMED STATE" not in prompt
+    assert "handoff" not in prompt.lower()
 
 
 def test_assemble_prompt_contains_signals() -> None:

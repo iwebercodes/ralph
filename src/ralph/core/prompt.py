@@ -90,27 +90,20 @@ Spec file: {spec_path}
 {goal}
 ---
 
-## CLAIMED STATE (from previous rotation - DO NOT TRUST BLINDLY)
-
----
-{handoff}
----
-
 ## YOUR INSTRUCTIONS
 
-1. **Be Skeptical**: The previous rotation may have missed something. Assume it did.
-2. **Verify Independently**: Don't just read the handoff - actually check the work.
+1. **Be Skeptical**: Do not assume the previous rotation was thorough. Assume something was missed.
+2. **Verify Independently**: Actually check the work yourself — do not take claims at face value.
    - Run the tests yourself
    - Inspect the code critically
    - Test edge cases the previous rotation might have skipped
    - Write temporary test scripts if needed to verify behavior
 3. **Check Every Criterion**: Go through current spec {spec_path} success criteria one by one.
-4. **If Anything Is Wrong**: Fix it, update the handoff for this spec,
-   and signal CONTINUE (not DONE). Handoff file is ({handoff_path}).
+4. **If Anything Is Wrong**: Fix it and signal CONTINUE (not DONE).
 5. **If the automated tests are missing or are not aligned with the spec**: Fix the automated tests.
-6. **If Everything Passes**: Update the handoff for this spec confirming your verification,
-   signal DONE. Handoff file is ({handoff_path}).
-7. **Clean Up**: Before finishing, clean up temporary files and/or folder you've created.
+6. **If Everything Passes**: Signal DONE — only after you are
+   confident the work is genuinely complete.
+7. **Clean Up**: Before finishing, clean up temporary files and/or folders you've created.
    Especially temporary scripts used for verification. But also artifacts like
    screenshots or tool use reports.
 
@@ -244,11 +237,9 @@ def assemble_prompt(
             iteration=iteration,
             max_iter=max_iter,
             goal=goal,
-            handoff=handoff,
             guardrails=guardrails,
             done_count_plus_one=done_count + 1,
             spec_path=spec_path,
-            handoff_path=handoff_path,
         )
     else:
         return PROMPT_TEMPLATE_IMPLEMENT.format(

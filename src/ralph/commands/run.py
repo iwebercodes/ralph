@@ -26,16 +26,7 @@ from ralph.core.state import (
     read_state,
     save_run_config,
 )
-from ralph.output.console import Console
-
-
-def format_duration(seconds: float) -> str:
-    """Format duration as human-readable string."""
-    minutes = int(seconds // 60)
-    secs = int(seconds % 60)
-    if minutes > 0:
-        return f"{minutes}m {secs}s"
-    return f"{secs}s"
+from ralph.output.console import Console, format_human_duration
 
 
 def _filter_specs(spec_filter: str | None, specs: list[Spec]) -> list[Spec]:
@@ -376,7 +367,7 @@ After installing, verify with: claude --version, codex --version, or pi --versio
     )
 
     duration = time.time() - start_time
-    duration_str = format_duration(duration)
+    duration_str = format_human_duration(duration)
 
     if result.exit_code == 0:
         console.goal_achieved(result.iterations_run, duration_str)
