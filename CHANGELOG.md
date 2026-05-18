@@ -1,5 +1,36 @@
 # Changelog
 
+## v0.6.0 - Scheduled Specs, No-Sleep Mode & Resumable Runs
+
+This release adds scheduled (periodic) spec execution via `.every-[n].spec.md` filenames, preventing OS sleep during long-running Ralph sessions, and the `--continue` flag for resuming interrupted runs. It also introduces a spec-writing skill for consistent spec creation, switches CI to uv for dependency resolution consistency, and improves verification accuracy by removing handoff injection from REVIEW prompts.
+
+### Added
+
+- **Scheduled (periodic) spec execution**: Spec files matching `.every-[n].spec.md` (e.g., `cleanup.every-5.spec.md`) run only on every n-th rotation (`iteration % n == 0`), skipping on other rotations while staying in the pool. Useful for cleanup, consolidation, and maintenance tasks that don't need to run every rotation. Scheduled specs get priority when their turn arrives, and gap-filling runs other eligible specs during skip iterations.
+
+- **No-sleep mode**: Ralph now prevents OS sleep/hibernation automatically during runs on Linux (via `systemd-inhibit`), macOS (`caffeinate`), and Windows (`SetThreadExecutionState`). This is essential for multi-hour unattended agent loops — system sleep would kill running processes. No CLI flag needed; always active by default since it's core to Ralph's purpose. Cleanly released on any exit path (success, error, Ctrl+C, crash).
+
+- **`--continue` / `-c` flag**: Resume interrupted runs from where they left off. Reads saved configuration (`--agents`, `--max`, `--timeout`, `--filter`) from `.ralph/run_config.json`. Explicit CLI flags override saved values. Solves the problem of losing run configuration after Ctrl+C or crashes.
+
+- **Spec-writing skill**: `.agents/skills/spec-writing/SKILL.md` provides shared guidance on writing effective spec files for Ralph. Covers spec anatomy (Problem → Goal → Success Criteria → Constraints → Notes), verifiable success criteria, file naming conventions, common patterns, and a review checklist.
+
+### Changed
+
+- **REVIEW prompt no longer includes handoff**: Removed "CLAIMED STATE" section from REVIEW prompts to prevent false verification — models were trusting prior rotation claims without independently checking. Review agents now inspect code and tests from a fresh POV.
+
+- **CI/CD uses `uv` for dependency resolution**: Both CI workflows (`.github/workflows/ci.yml` and `publish.yml`) now use `uv sync --extra dev` instead of pip, ensuring CI resolves dependencies identically to local development. Fixes mypy strict type check failures caused by version mismatches between pip and uv.
+
+- **Spec state tracking enhanced**: Each spec now tracks its scheduled period (`every_n`) in state.json, persisted only when > 1 for backward compatibility with older versions.
+
+### Fixed
+
+- **Bare `PathSpec` type annotation**: Updated type annotations in `core/ignore.py`, `core/no_sleep.py`, and `core/snapshot.py` to use `pathspec.PathSpec` instead of bare `PathSpec`, fixing mypy strict checks with pathspec 1.1+.
+
+### QA
+
+- **Comprehensive scheduled specs test suite**: 973 lines of tests covering period parsing, eligibility checking, gap-filling, priority ordering, completion detection, and edge cases (every-0, every-abc, multiple periods, legacy state compatibility).
+- **No-sleep mode test suite**: 863 lines of tests covering each platform, cleanup paths, edge cases, and live smoke tests verifying real inhibitor registration.
+
 ## v0.5.0 - Agent Pool Expansion, CLI Enhancements & Performance Tuning
 
 This release adds the Pi agent as a third backend option (alongside Claude and Codex), enhances the CLI with global flags and JSON output, improves token efficiency with less aggressive counter resets, and adds rotation timing display.
